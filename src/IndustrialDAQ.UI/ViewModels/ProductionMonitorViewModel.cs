@@ -10,6 +10,8 @@ using Prism.Events;
 using Prism.Mvvm;
 using IndustrialDAQ.UI.Events;
 using IndustrialDAQ.UI.Services;
+using IndustrialDAQ.Core.Authorization;
+using IndustrialDAQ.Core.ResourceTree;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
@@ -25,6 +27,9 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
     private CancellationTokenSource? _cts;
     private readonly Dictionary<string, TagDisplayItem> _itemLookup = new();
     private readonly IAuthManager _authManager;
+    private readonly SecurityAuditService _auditService;
+    private readonly IAuthorizationService _authorizationService;
+    private readonly IResourceTreeService _resourceTreeService;
     public bool CanModify => _authManager.CanModify;
 
     // ─── 设备选择 ───
@@ -84,13 +89,19 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
         AcquisitionHost acquisitionHost,
         IEventAggregator eventAggregator,
         IDialogService dialogService,
-        IAuthManager authManager)
+        IAuthManager authManager,
+        SecurityAuditService auditService,
+        IAuthorizationService authorizationService,
+        IResourceTreeService resourceTreeService)
     {
         _realTimeStore = realTimeStore ?? throw new ArgumentNullException(nameof(realTimeStore));
         _acquisitionHost = acquisitionHost ?? throw new ArgumentNullException(nameof(acquisitionHost));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _eventAggregator = eventAggregator ?? throw new ArgumentNullException(nameof(eventAggregator));
         _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
+        _auditService = auditService;
+        _authorizationService = authorizationService;
+        _resourceTreeService = resourceTreeService;
 
         // 订阅配置重载事件
         eventAggregator.GetEvent<ConfigurationReloadedEvent>().Subscribe(LoadDevices);
@@ -166,13 +177,24 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
         }
     }
 
-    private void OnWriteTag(TagDisplayItem? item)
+    private async void OnWriteTag(TagDisplayItem? item)
     {
         // 命令层再次校验，避免仅依赖按钮隐藏造成越权写入。
         if (!CanModify || item == null || _selectedDevice == null) return;
 
         var targetTag = _selectedDevice.Tags.FirstOrDefault(t => t.Id == item.TagId);
         if (targetTag == null) return;
+
+        // 以资源树中的权威路径做动态授权，禁止使用设备 ID 拼接出第二套路由。
+        var resourceNode = _resourceTreeService.Current.Nodes.FirstOrDefault(node => node.Id == targetTag.Id);
+        var resourcePath = resourceNode?.Path ?? new ResourcePath($"Devices/{_selectedDevice.Id}/{targetTag.Id}");
+        bool allowed = await _authorizationService.CanAsync(_authManager.CurrentUser.ToSubject(), resourcePath, "Write");
+        if (!allowed)
+        {
+            await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "AuthorizationDenied", resourcePath.Value, "Action=Write;入口=生产监控", false);
+            _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage { Title = "权限拒绝", Message = "当前账号没有该数据点的写入权限。", Type = NotificationType.Error });
+            return;
+        }
 
         var parameters = new DialogParameters
         {
@@ -223,6 +245,7 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
                     try
                     {
                         await driver.WriteTagAsync(targetTag, writeValue, CancellationToken.None);
+                        await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "TagWrite", resourcePath.Value, $"Value={writeValue}", true);
                         _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage
                         {
                             Title = "写入成功",
@@ -232,6 +255,7 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
                     }
                     catch (Exception ex)
                     {
+                        await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "TagWrite", resourcePath.Value, ex.Message, false);
                         _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage
                         {
                             Title = "写入错误",

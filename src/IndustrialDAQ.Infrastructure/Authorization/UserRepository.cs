@@ -21,7 +21,9 @@ public sealed class UserRepository : IUserRepository
             .FirstOrDefaultAsync(u => u.Username == username, cancellationToken)
             .ConfigureAwait(false);
 
-        return entity is null ? null : MapToModel(entity);
+        if (entity is null) return null;
+        var roles = await LoadRolesAsync(context, entity.Id, cancellationToken);
+        return MapToModel(entity, roles);
     }
 
     public async Task<User?> FindByIdAsync(string id, CancellationToken cancellationToken = default)
@@ -32,7 +34,9 @@ public sealed class UserRepository : IUserRepository
             .FirstOrDefaultAsync(u => u.Id == id, cancellationToken)
             .ConfigureAwait(false);
 
-        return entity is null ? null : MapToModel(entity);
+        if (entity is null) return null;
+        var roles = await LoadRolesAsync(context, entity.Id, cancellationToken);
+        return MapToModel(entity, roles);
     }
 
     public async Task<IReadOnlyList<User>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -43,7 +47,9 @@ public sealed class UserRepository : IUserRepository
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        return entities.Select(MapToModel).ToList();
+        var links = await context.UserRoles.AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
+        var roleNames = await context.Roles.AsNoTracking().ToDictionaryAsync(role => role.Id, role => role.Name, cancellationToken).ConfigureAwait(false);
+        return entities.Select(entity => MapToModel(entity, links.Where(link => link.UserId == entity.Id).Select(link => roleNames.GetValueOrDefault(link.RoleId)).Where(name => name is not null)!)).ToList();
     }
 
     public async Task UpsertAsync(User user, CancellationToken cancellationToken = default)
@@ -63,6 +69,14 @@ public sealed class UserRepository : IUserRepository
         }
 
         await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        var oldLinks = await context.UserRoles.Where(link => link.UserId == user.Id).ToListAsync(cancellationToken).ConfigureAwait(false);
+        context.UserRoles.RemoveRange(oldLinks);
+        foreach (var roleName in user.Roles.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var role = await context.Roles.FirstOrDefaultAsync(item => item.Name == roleName, cancellationToken).ConfigureAwait(false);
+            if (role is not null) context.UserRoles.Add(new UserRoleEntity { UserId = user.Id, RoleId = role.Id });
+        }
+        await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task DeleteAsync(string id, CancellationToken cancellationToken = default)
@@ -76,7 +90,7 @@ public sealed class UserRepository : IUserRepository
         }
     }
 
-    private static User MapToModel(UserEntity entity)
+    private static User MapToModel(UserEntity entity, IEnumerable<string?> roles)
     {
         return new User
         {
@@ -84,12 +98,22 @@ public sealed class UserRepository : IUserRepository
             Username = entity.Username,
             PasswordHash = entity.PasswordHash,
             RealName = entity.RealName,
-            Roles = string.IsNullOrWhiteSpace(entity.Roles) 
-                ? new List<string>() 
-                : entity.Roles.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(),
+            Roles = roles.Where(role => !string.IsNullOrWhiteSpace(role)).Cast<string>().ToList(),
             CreatedAtUtc = entity.CreatedAtUtc,
             IsActive = entity.IsActive
+            ,FailedLoginCount = entity.FailedLoginCount
+            ,LockedUntilUtc = entity.LockedUntilUtc
+            ,MustChangePassword = entity.MustChangePassword
+            ,LastLoginAtUtc = entity.LastLoginAtUtc
         };
+    }
+
+    private static async Task<IReadOnlyList<string>> LoadRolesAsync(DaqDbContext context, string userId, CancellationToken cancellationToken)
+    {
+        return await (from link in context.UserRoles
+                      join role in context.Roles on link.RoleId equals role.Id
+                      where link.UserId == userId
+                      select role.Name).ToListAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static void MapToEntity(User model, UserEntity entity)
@@ -97,8 +121,11 @@ public sealed class UserRepository : IUserRepository
         entity.Username = model.Username;
         entity.PasswordHash = model.PasswordHash;
         entity.RealName = model.RealName;
-        entity.Roles = string.Join(',', model.Roles);
         entity.CreatedAtUtc = model.CreatedAtUtc;
         entity.IsActive = model.IsActive;
+        entity.FailedLoginCount = model.FailedLoginCount;
+        entity.LockedUntilUtc = model.LockedUntilUtc;
+        entity.MustChangePassword = model.MustChangePassword;
+        entity.LastLoginAtUtc = model.LastLoginAtUtc;
     }
 }

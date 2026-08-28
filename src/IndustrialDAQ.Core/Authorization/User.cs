@@ -15,6 +15,10 @@ public sealed class User
 
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
     public bool IsActive { get; set; } = true;
+    public int FailedLoginCount { get; set; }
+    public DateTime? LockedUntilUtc { get; set; }
+    public bool MustChangePassword { get; set; }
+    public DateTime? LastLoginAtUtc { get; set; }
 
     public PermissionSubject ToSubject()
     {

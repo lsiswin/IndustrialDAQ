@@ -201,6 +201,36 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- 用户权限只通过系统设置维护，符合工业现场最小权限原则。 -->
+                        <Border Style="{StaticResource CardBorderStyle}"
+                                Visibility="{Binding SelectedCategory.Name, Converter={StaticResource CategoryToVis}, ConverterParameter=用户与权限}">
+                            <Grid DataContext="{Binding UserAccessManagement}">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,10"><TextBlock Text="🔐 用户与权限管理中心" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}"/><Button Content="刷新" Command="{Binding RefreshCommand}" HorizontalAlignment="Right" Width="70"/></Grid>
+                                <DataGrid Grid.Row="1" ItemsSource="{Binding Users}" SelectedItem="{Binding SelectedUser}" AutoGenerateColumns="False" Height="220" CanUserAddRows="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="账号" Binding="{Binding Username}" IsReadOnly="True" Width="*"/>
+                                        <DataGridTextColumn Header="姓名" Binding="{Binding RealName}" IsReadOnly="True" Width="*"/>
+                                        <DataGridComboBoxColumn Header="角色" SelectedItemBinding="{Binding Role}" ItemsSource="{Binding DataContext.Roles, RelativeSource={RelativeSource AncestorType=DataGrid}}" Width="120"/>
+                                        <DataGridCheckBoxColumn Header="启用" Binding="{Binding IsActive}" Width="70"/>
+                                        <DataGridTextColumn Header="创建时间" Binding="{Binding CreatedAtUtc, StringFormat=yyyy-MM-dd HH:mm}" IsReadOnly="True" Width="150"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <Grid Grid.Row="2" Margin="0,10,0,14"><TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"/><Button Content="保存账号权限" Command="{Binding SaveCommand}" HorizontalAlignment="Right" Padding="16,7" Visibility="{Binding IsAdministrator, Converter={StaticResource BoolToVisibility}}"/></Grid>
+                                <TextBlock Grid.Row="3" Text="操作审计日志（最近 200 条）" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,8"/>
+                                <DataGrid Grid.Row="4" ItemsSource="{Binding Audits}" AutoGenerateColumns="False" MinHeight="240" IsReadOnly="True" CanUserAddRows="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="时间" Binding="{Binding OccurredAtUtc, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="150"/>
+                                        <DataGridTextColumn Header="账号" Binding="{Binding Username}" Width="100"/>
+                                        <DataGridTextColumn Header="动作" Binding="{Binding Action}" Width="150"/>
+                                        <DataGridTextColumn Header="资源路径" Binding="{Binding ResourcePath}" Width="2*"/>
+                                        <DataGridTextColumn Header="结果" Binding="{Binding Success}" Width="65"/>
+                                        <DataGridTextColumn Header="详情" Binding="{Binding Detail}" Width="2*"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+
                     </StackPanel>
                 </ScrollViewer>
 

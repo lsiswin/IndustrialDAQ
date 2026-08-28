@@ -39,6 +39,9 @@ public sealed class DaqDbContext : DbContext
 
     /// <summary>User account table.</summary>
     public DbSet<UserEntity> Users => Set<UserEntity>();
+    public DbSet<RoleEntity> Roles => Set<RoleEntity>();
+    public DbSet<UserRoleEntity> UserRoles => Set<UserRoleEntity>();
+    public DbSet<SecurityAuditEntity> SecurityAudits => Set<SecurityAuditEntity>();
 
     /// <summary>
     /// 使用选项配置（由 DI 注入连接字符串）。
@@ -146,6 +149,19 @@ public sealed class DaqDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Username).IsUnique();
             entity.HasIndex(e => e.IsActive);
+        });
+        modelBuilder.Entity<RoleEntity>(entity => { entity.HasKey(item => item.Id); entity.HasIndex(item => item.Name).IsUnique(); });
+        modelBuilder.Entity<UserRoleEntity>(entity =>
+        {
+            entity.HasKey(item => new { item.UserId, item.RoleId });
+            entity.HasIndex(item => item.RoleId);
+        });
+        modelBuilder.Entity<SecurityAuditEntity>(entity =>
+        {
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.OccurredAtUtc);
+            entity.HasIndex(item => item.UserId);
+            entity.HasIndex(item => item.Action);
         });
     }
 }

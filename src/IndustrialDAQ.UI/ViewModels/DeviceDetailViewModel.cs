@@ -21,6 +21,7 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
     private readonly IResourceTreeService _resourceTreeService;
     private readonly IAuthManager _authManager;
     private readonly IAuthorizationService _authorizationService;
+    private readonly SecurityAuditService _auditService;
     private CancellationTokenSource? _cts;
     
     // TagId -> TagDisplayItem mapping for fast real-time updates
@@ -38,7 +39,8 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
         IEventAggregator eventAggregator,
         IResourceTreeService resourceTreeService,
         IAuthManager authManager,
-        IAuthorizationService authorizationService)
+        IAuthorizationService authorizationService,
+        SecurityAuditService auditService)
     {
         _realTimeStore = realTimeStore ?? throw new ArgumentNullException(nameof(realTimeStore));
         _acquisitionHost = acquisitionHost ?? throw new ArgumentNullException(nameof(acquisitionHost));
@@ -47,6 +49,7 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
         _resourceTreeService = resourceTreeService ?? throw new ArgumentNullException(nameof(resourceTreeService));
         _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
         _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
+        _auditService = auditService;
         
         _cts = new CancellationTokenSource();
         WriteTagCommand = new DelegateCommand<TagDisplayItem>(OnWriteTagAsync, _ => CanModify);
@@ -110,7 +113,8 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
                 var item = new TagDisplayItem(tag.Id)
                 {
                     TagName = tag.Name,
-                    Description = tag.Description ?? $"{device.Name}/{tag.Name}",
+                    // 资源树尚未初始化时也使用统一的 Devices 根路径，保证授权语义不漂移。
+                    Description = $"Devices/{device.Id}/{tag.Id}",
                     Value = "-",
                     Quality = "Init",
                     Timestamp = "-",
@@ -243,43 +247,37 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
         // 未登录和访客身份始终只读，不进入后续资源路径授权流程。
         if (!CanModify || item == null) return;
         
-        // 当权限快照为空（未配置任何权限策略）时，直接放行（开放模式）
-        bool permissionConfigured = _authorizationService.Current.Policies.Count > 0;
-        
-        if (permissionConfigured)
+        // 始终执行默认拒绝授权；基础角色权限由初始化策略提供，避免空策略导致全局放行。
+        bool pathValid = ResourcePath.TryParse(item.Description, out var path);
+        bool hasPermission = pathValid &&
+            await _authorizationService.CanAsync(_authManager.CurrentUser.ToSubject(), path, "Write");
+
+        if (!hasPermission)
         {
-            // 权限验证
-            bool pathValid = ResourcePath.TryParse(item.Description, out var path);
-            bool hasPermission = pathValid && 
+            bool loginSuccess = false;
+            _dialogService.ShowDialog("LoginDialog", null, result =>
+            {
+                if (result.Result == ButtonResult.OK)
+                {
+                    loginSuccess = true;
+                }
+            });
+
+            if (!loginSuccess) return;
+
+            hasPermission = pathValid &&
                 await _authorizationService.CanAsync(_authManager.CurrentUser.ToSubject(), path, "Write");
-            
             if (!hasPermission)
             {
-                // Popup Login Dialog
-                bool loginSuccess = false;
-                _dialogService.ShowDialog("LoginDialog", null, result =>
+                string deniedPath = pathValid ? path.Value : "Devices/Unknown";
+                await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "AuthorizationDenied", deniedPath, "Action=Write;入口=设备详情", false);
+                _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage
                 {
-                    if (result.Result == ButtonResult.OK)
-                    {
-                        loginSuccess = true;
-                    }
+                    Title = "权限拒绝",
+                    Message = "当前用户没有向此测点写入数据的权限。",
+                    Type = NotificationType.Error
                 });
-
-                if (!loginSuccess) return;
-
-                // Recheck permission after login
-                hasPermission = pathValid &&
-                    await _authorizationService.CanAsync(_authManager.CurrentUser.ToSubject(), path, "Write");
-                if (!hasPermission)
-                {
-                    _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage
-                    {
-                        Title = "权限拒绝",
-                        Message = "当前用户没有向此测点写入数据的权限。",
-                        Type = NotificationType.Error
-                    });
-                    return;
-                }
+                return;
             }
         }
 
@@ -347,6 +345,7 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
                     try
                     {
                         await driver.WriteTagAsync(targetTag, writeValue, CancellationToken.None);
+                        await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "TagWrite", item.Description, $"Tag={targetTag.Id};Value={writeValue}", true);
                         _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage
                         {
                             Title = "写入成功",
@@ -356,6 +355,7 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
                     }
                     catch (Exception ex)
                     {
+                        await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "TagWrite", item.Description, ex.Message, false);
                         _eventAggregator.GetEvent<NotificationEvent>().Publish(new NotificationMessage
                         {
                             Title = "写入错误",

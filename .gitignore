@@ -364,6 +364,11 @@ MigrationBackup/
 
 # Codex / local agent generated files
 .codex-build*/
+.auth-build*/
+.rbac-build*/
+.permission-build*/
+.security-test-build*/
+.security-tests/
 .uploads/
 .workbuddy/
 

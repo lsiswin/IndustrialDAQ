@@ -20,8 +20,7 @@ public sealed class RegisterDialogViewModel : BindableBase, IDialogAware
     public string SelectedRole { get => _selectedRole; set => SetProperty(ref _selectedRole, value); }
     public string ErrorMessage { get => _errorMessage; set { SetProperty(ref _errorMessage, value); RaisePropertyChanged(nameof(HasError)); } }
     public bool HasError => !string.IsNullOrWhiteSpace(ErrorMessage);
-    public IReadOnlyList<RoleOption> RegisterRoles { get; } =
-    [new("Guest", "访客"), new("Engineer", "工程师")];
+    public IReadOnlyList<RoleOption> RegisterRoles { get; } = [new("Guest", "访客")];
 
     public DelegateCommand RegisterCommand { get; }
     public DelegateCommand CancelCommand { get; }

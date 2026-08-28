@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace IndustrialDAQ.Infrastructure.Entities;
 
-[Table("users")]
+[Table("security_users")]
 public class UserEntity
 {
     [Key]
@@ -23,13 +23,13 @@ public class UserEntity
     [MaxLength(100)]
     public string RealName { get; set; } = string.Empty;
 
-    [Column("roles")]
-    [MaxLength(500)]
-    public string Roles { get; set; } = string.Empty;
-
     [Column("created_at_utc")]
     public DateTime CreatedAtUtc { get; set; }
 
     [Column("is_active")]
     public bool IsActive { get; set; }
+    [Column("failed_login_count")] public int FailedLoginCount { get; set; }
+    [Column("locked_until_utc")] public DateTime? LockedUntilUtc { get; set; }
+    [Column("must_change_password")] public bool MustChangePassword { get; set; }
+    [Column("last_login_at_utc")] public DateTime? LastLoginAtUtc { get; set; }
 }

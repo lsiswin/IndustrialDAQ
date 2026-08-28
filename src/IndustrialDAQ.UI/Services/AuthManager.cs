@@ -6,6 +6,7 @@ namespace IndustrialDAQ.UI.Services;
 public class AuthManager : IAuthManager
 {
     private readonly IUserRepository _userRepository;
+    private readonly SecurityAuditService _auditService;
 
     private static readonly User GuestUser = new User
     {
@@ -27,36 +28,37 @@ public class AuthManager : IAuthManager
     /// <inheritdoc />
     public event EventHandler? CurrentUserChanged;
 
-    public AuthManager(IUserRepository userRepository)
+    public AuthManager(IUserRepository userRepository, SecurityAuditService auditService)
     {
         _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
+        _auditService = auditService;
     }
 
     public async Task<bool> LoginAsync(string username, string password)
     {
+        // 工业终端连续失败 5 次后锁定 15 分钟，降低现场共享终端的暴力尝试风险。
         var user = await _userRepository.FindByUsernameAsync(username);
+        if (user?.LockedUntilUtc > DateTime.UtcNow) return false;
 
         if (user is not null && VerifyPassword(password, user.PasswordHash) && user.IsActive)
         {
             CurrentUser = user;
+            user.FailedLoginCount = 0;
+            user.LockedUntilUtc = null;
+            user.LastLoginAtUtc = DateTime.UtcNow;
+            await _userRepository.UpsertAsync(user);
             CurrentUserChanged?.Invoke(this, EventArgs.Empty);
+            await _auditService.RecordAsync(user.Id, user.Username, "Login", "/system/auth", "登录成功", true);
             return true;
         }
 
-        // 用于演示/开发环境：如果是 admin / admin
-        if (username.Equals("admin", StringComparison.OrdinalIgnoreCase) && password == "admin")
+        if (user is not null)
         {
-            CurrentUser = new User
-            {
-                Id = "admin-sys",
-                Username = "admin",
-                RealName = "系统管理员",
-                Roles = new List<string> { "Admin", "Operator" }
-            };
-            CurrentUserChanged?.Invoke(this, EventArgs.Empty);
-            return true;
+            user.FailedLoginCount++;
+            if (user.FailedLoginCount >= 5) { user.FailedLoginCount = 0; user.LockedUntilUtc = DateTime.UtcNow.AddMinutes(15); }
+            await _userRepository.UpsertAsync(user);
+            await _auditService.RecordAsync(user.Id, user.Username, "LoginFailed", "/system/auth", "登录失败", false);
         }
-
         return false;
     }
 
@@ -69,10 +71,10 @@ public class AuthManager : IAuthManager
 
         if (username.Length < 3)
             return (false, "用户名至少需要 3 个字符。");
-        if (password.Length < 6)
-            return (false, "密码至少需要 6 个字符。");
-        if (role is not ("Guest" or "Engineer"))
-            return (false, "自助注册仅支持访客或工程师身份。");
+        if (password.Length < 8 || !password.Any(char.IsUpper) || !password.Any(char.IsLower) || !password.Any(char.IsDigit))
+            return (false, "密码至少 8 位，并同时包含大写字母、小写字母和数字。");
+        // 工业上位机禁止匿名用户自助提升权限，新账号统一以访客身份创建。
+        role = "Guest";
         if (await _userRepository.FindByUsernameAsync(username) is not null)
             return (false, "该用户名已经存在。");
 
@@ -88,10 +90,33 @@ public class AuthManager : IAuthManager
         return (true, "注册成功，请使用新账号登录。");
     }
 
+    public async Task<(bool Success, string Message)> UpdateUserAccessAsync(string userId, string role, bool isActive)
+    {
+        if (!IsAdministrator) return (false, "仅管理员可以维护账号权限。");
+        if (userId == CurrentUser.Id) return (false, "不能在当前会话中修改自己的角色或状态。");
+        if (role is not ("Guest" or "Engineer" or "Admin")) return (false, "无效的账号角色。");
+
+        var user = await _userRepository.FindByIdAsync(userId);
+        if (user is null) return (false, "账号不存在。");
+        await _userRepository.UpsertAsync(new User
+        {
+            Id = user.Id, Username = user.Username, RealName = user.RealName,
+            PasswordHash = user.PasswordHash, Roles = [role], IsActive = isActive,
+            CreatedAtUtc = user.CreatedAtUtc, FailedLoginCount = user.FailedLoginCount,
+            LockedUntilUtc = user.LockedUntilUtc, MustChangePassword = user.MustChangePassword,
+            LastLoginAtUtc = user.LastLoginAtUtc
+        });
+        await _auditService.RecordAsync(CurrentUser.Id, CurrentUser.Username, "PermissionChanged", "/system/users/" + user.Id, $"角色={role};启用={isActive}", true);
+        return (true, "账号权限已更新。");
+    }
+
     public void Logout()
     {
+        var previous = CurrentUser;
         CurrentUser = GuestUser;
         CurrentUserChanged?.Invoke(this, EventArgs.Empty);
+        if (previous.Id != GuestUser.Id)
+            _ = _auditService.RecordAsync(previous.Id, previous.Username, "Logout", "/system/auth", "主动退出登录", true);
     }
 
 
@@ -116,4 +141,5 @@ public class AuthManager : IAuthManager
         var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, expected.Length);
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
+
 }

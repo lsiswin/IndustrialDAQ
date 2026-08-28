@@ -33,6 +33,9 @@ public interface IAuthManager
     Task<(bool Success, string Message)> RegisterAsync(
         string username, string password, string realName, string role);
 
+    /// <summary>管理员更新账号角色与启用状态。</summary>
+    Task<(bool Success, string Message)> UpdateUserAccessAsync(string userId, string role, bool isActive);
+
     /// <summary>
     /// 登出
     /// </summary>

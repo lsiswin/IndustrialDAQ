@@ -74,6 +74,8 @@ public partial class App : PrismApplication
         
         containerRegistry.RegisterSingleton<IUserRepository, UserRepository>();
         containerRegistry.RegisterSingleton<IAuthManager, AuthManager>();
+        containerRegistry.RegisterSingleton<SecurityAuditService>();
+        containerRegistry.RegisterSingleton<PermissionManagementService>();
 
         containerRegistry.RegisterSingleton<IAuthorizationRepository, AuthorizationRepository>();
         containerRegistry.RegisterSingleton<IAuthorizationService, AuthorizationService>();
@@ -132,8 +134,10 @@ public partial class App : PrismApplication
             builder.AddSerilog();
         });
 
+        // 数据库固定到程序目录，避免从 IDE、终端或快捷方式启动时生成多份相对路径数据库。
+        var databasePath = Path.Combine(AppContext.BaseDirectory, "industrialdaq.db");
         services.AddDbContextFactory<DaqDbContext>(options =>
-            options.UseSqlite("Data Source=industrialdaq.db"));
+            options.UseSqlite($"Data Source={databasePath}"));
 
         extension.Populate(services);
 
@@ -151,6 +155,7 @@ public partial class App : PrismApplication
             db.Database.EnsureCreated();
             // 为已有数据库补建新增的表（EnsureCreated 不会为已有库添加新表）
             EnsureTemplateTablesExist(db);
+            EnsureSecuritySchema(db);
         }
 
         // ── 初始化内置设备模板（首次运行时写入数据库）──
@@ -386,6 +391,42 @@ public partial class App : PrismApplication
         cmd.ExecuteNonQuery();
 
         Log.Information("模板相关表已确保存在");
+    }
+
+    /// <summary>兼容升级已有现场数据库的账号安全字段和审计表。</summary>
+    private static void EnsureSecuritySchema(DaqDbContext db)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open) connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = @"CREATE TABLE IF NOT EXISTS security_users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, real_name TEXT NOT NULL, created_at_utc TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, failed_login_count INTEGER NOT NULL DEFAULT 0, locked_until_utc TEXT NULL, must_change_password INTEGER NOT NULL DEFAULT 0, last_login_at_utc TEXT NULL);
+            CREATE TABLE IF NOT EXISTS security_roles (Id TEXT PRIMARY KEY, Name TEXT NOT NULL UNIQUE, Description TEXT NOT NULL, IsBuiltIn INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE IF NOT EXISTS security_user_roles (UserId TEXT NOT NULL, RoleId TEXT NOT NULL, PRIMARY KEY(UserId, RoleId));
+            CREATE TABLE IF NOT EXISTS security_audits (Id INTEGER PRIMARY KEY AUTOINCREMENT, OccurredAtUtc TEXT NOT NULL, UserId TEXT NOT NULL, Username TEXT NOT NULL, Action TEXT NOT NULL, ResourcePath TEXT NOT NULL, Detail TEXT NOT NULL, Success INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS IX_security_audits_OccurredAtUtc ON security_audits(OccurredAtUtc);
+            CREATE INDEX IF NOT EXISTS IX_security_audits_UserId ON security_audits(UserId);
+            CREATE INDEX IF NOT EXISTS IX_security_audits_Action ON security_audits(Action);
+            INSERT OR IGNORE INTO security_roles VALUES ('role-guest','Guest','只读访客',1);
+            INSERT OR IGNORE INTO security_roles VALUES ('role-operator','Operator','生产操作员',1);
+            INSERT OR IGNORE INTO security_roles VALUES ('role-engineer','Engineer','工程维护人员',1);
+            INSERT OR IGNORE INTO security_roles VALUES ('role-admin','Admin','系统安全管理员',1);
+            INSERT OR IGNORE INTO permission_policies (Id,SubjectType,SubjectId,ResourcePath,Action,Effect,Inherit,Priority,IsEnabled,Version,CreatedAtUtc,UpdatedAtUtc) VALUES ('builtin-engineer-device-write','Role','Engineer','Devices','Write','Allow',1,100,1,1,datetime('now'),datetime('now'));
+            INSERT OR IGNORE INTO permission_policies (Id,SubjectType,SubjectId,ResourcePath,Action,Effect,Inherit,Priority,IsEnabled,Version,CreatedAtUtc,UpdatedAtUtc) VALUES ('builtin-admin-device-all','Role','Admin','Devices','*','Allow',1,100,1,1,datetime('now'),datetime('now'));
+            INSERT OR IGNORE INTO permission_policies (Id,SubjectType,SubjectId,ResourcePath,Action,Effect,Inherit,Priority,IsEnabled,Version,CreatedAtUtc,UpdatedAtUtc) VALUES ('builtin-admin-system-all','Role','Admin','System','*','Allow',1,100,1,1,datetime('now'),datetime('now'));";
+        command.ExecuteNonQuery();
+
+        using var admin = connection.CreateCommand();
+        admin.CommandText = "INSERT OR IGNORE INTO security_users (id,username,password_hash,real_name,created_at_utc,is_active,must_change_password) VALUES ('admin-sys','admin',@hash,'系统管理员',@created,1,1); INSERT OR IGNORE INTO security_user_roles VALUES ('admin-sys','role-admin');";
+        var hash = admin.CreateParameter(); hash.ParameterName = "@hash"; hash.Value = CreateInitialPasswordHash("Admin#2026"); admin.Parameters.Add(hash);
+        var created = admin.CreateParameter(); created.ParameterName = "@created"; created.Value = DateTime.UtcNow.ToString("O"); admin.Parameters.Add(created);
+        admin.ExecuteNonQuery();
+    }
+
+    private static string CreateInitialPasswordHash(string password)
+    {
+        var salt = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var hash = System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, System.Security.Cryptography.HashAlgorithmName.SHA256, 32);
+        return $"PBKDF2${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
     }
 
     /// <summary>
