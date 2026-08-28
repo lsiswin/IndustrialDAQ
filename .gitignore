@@ -371,6 +371,9 @@ MigrationBackup/
 industrialdaq.db
 industrialdaq.db-shm
 industrialdaq.db-wal
+**/industrialdaq.db
+**/industrialdaq.db-shm
+**/industrialdaq.db-wal
 *.db-shm
 *.db-wal
 
