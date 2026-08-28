@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/Plugins/">
+    <File Path="config/production-line.json" />
     <Project Path="Plugins/Drivers.Modbus/Drivers.Modbus.csproj" />
     <Project Path="Plugins/Drivers.OpcUA/Drivers.OpcUA.csproj" />
     <Project Path="Plugins/Drivers.S7/Drivers.S7.csproj" />

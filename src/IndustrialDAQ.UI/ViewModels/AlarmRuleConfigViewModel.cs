@@ -4,7 +4,9 @@ using System.Threading.Tasks;
 using System.Windows;
 using IndustrialDAQ.Core.Models;
 using IndustrialDAQ.Core.ResourceTree;
+using IndustrialDAQ.Alarm.RuleEngine;
 using IndustrialDAQ.UI.Events;
+using IndustrialDAQ.UI.Services;
 using Prism.Commands;
 using Prism.Events;
 using Prism.Mvvm;
@@ -24,7 +26,10 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
     private readonly IAlarmDefinitionRepository _repository;
     private readonly IAlarmDefinitionService _alarmDefinitionService;
     private readonly IResourceTreeService _resourceTreeService;
+    private readonly IRuleEngineService _ruleEngineService;
     private readonly IEventAggregator _eventAggregator;
+    private readonly IAuthManager _authManager;
+    public bool CanModify => _authManager.CanModify;
 
     // ── 规则列表 ──
     public ObservableCollection<AlarmDefinition> Rules { get; } = new();
@@ -115,9 +120,11 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
         {
             if (SetProperty(ref _selectedTagName, value))
             {
-                if (value != null)
+                // 空数据点名称不能作为 ResourcePath 解析，避免保存后回填失败。
+                if (!string.IsNullOrWhiteSpace(value))
                     _resolvedTagId = ResolveTagId(value);
                 RaisePropertyChanged(nameof(CanSave));
+                RaisePropertyChanged(nameof(PreviewSummary));
             }
         }
     }
@@ -129,14 +136,28 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
     public bool UseCustomResourcePath
     {
         get => _useCustomResourcePath;
-        set => SetProperty(ref _useCustomResourcePath, value);
+        set
+        {
+            if (SetProperty(ref _useCustomResourcePath, value))
+            {
+                RaisePropertyChanged(nameof(CanSave));
+                RaisePropertyChanged(nameof(PreviewSummary));
+            }
+        }
     }
 
     private string? _customTargetResourcePath;
     public string? CustomTargetResourcePath
     {
         get => _customTargetResourcePath;
-        set => SetProperty(ref _customTargetResourcePath, value);
+        set
+        {
+            if (SetProperty(ref _customTargetResourcePath, value))
+            {
+                RaisePropertyChanged(nameof(CanSave));
+                RaisePropertyChanged(nameof(PreviewSummary));
+            }
+        }
     }
 
     private string? _customResourcePath;
@@ -287,23 +308,35 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
         IAlarmDefinitionRepository repository,
         IAlarmDefinitionService alarmDefinitionService,
         IResourceTreeService resourceTreeService,
-        IEventAggregator eventAggregator)
+        IRuleEngineService ruleEngineService,
+        IEventAggregator eventAggregator,
+        IAuthManager authManager)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _alarmDefinitionService = alarmDefinitionService ?? throw new ArgumentNullException(nameof(alarmDefinitionService));
         _resourceTreeService = resourceTreeService ?? throw new ArgumentNullException(nameof(resourceTreeService));
+        _ruleEngineService = ruleEngineService ?? throw new ArgumentNullException(nameof(ruleEngineService));
         _eventAggregator = eventAggregator ?? throw new ArgumentNullException(nameof(eventAggregator));
+        _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
+        _authManager.CurrentUserChanged += (_, _) => RaisePropertyChanged(nameof(CanModify));
 
-        CreateNewCommand = new DelegateCommand(OnCreateNew);
-        SaveCommand = new DelegateCommand(OnSaveExecute, () => CanSave)
+        CreateNewCommand = new DelegateCommand(OnCreateNew, () => CanModify);
+        SaveCommand = new DelegateCommand(OnSaveExecute, () => CanModify && CanSave)
             .ObservesProperty(() => AlarmCode)
             .ObservesProperty(() => SelectedResourcePath)
             .ObservesProperty(() => UseCustomResourcePath)
             .ObservesProperty(() => CustomTargetResourcePath)
             .ObservesProperty(() => UseCustomCondition)
             .ObservesProperty(() => ConditionExpression);
-        DeleteCommand = new DelegateCommand(OnDeleteExecute, () => IsEditMode).ObservesProperty(() => IsEditMode);
-        ReloadEngineCommand = new DelegateCommand(OnReloadEngineExecute);
+        DeleteCommand = new DelegateCommand(OnDeleteExecute, () => CanModify && IsEditMode).ObservesProperty(() => IsEditMode);
+        ReloadEngineCommand = new DelegateCommand(OnReloadEngineExecute, () => CanModify);
+        _authManager.CurrentUserChanged += (_, _) =>
+        {
+            CreateNewCommand.RaiseCanExecuteChanged();
+            SaveCommand.RaiseCanExecuteChanged();
+            DeleteCommand.RaiseCanExecuteChanged();
+            ReloadEngineCommand.RaiseCanExecuteChanged();
+        };
 
         // 设备树热重载（运行时增删设备）后，自动刷新资源路径下拉框
         _eventAggregator.GetEvent<ConfigurationReloadedEvent>().Subscribe(OnConfigurationReloaded);
@@ -452,6 +485,11 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
                     ? (ResourcePath?)ResourcePath.Parse($"{targetPath}/Alarm/{AlarmCode}")
                     : null);
 
+            // 自定义路径模式没有下拉数据点名称，统一从目标资源路径末段推导。
+            var resolvedTagName = !string.IsNullOrWhiteSpace(SelectedTagName)
+                ? SelectedTagName.Split('/').Last()
+                : targetPath?.Value.Split('/').LastOrDefault() ?? tagId;
+
             var condition = UseCustomCondition && !string.IsNullOrWhiteSpace(ConditionExpression)
                 ? ConditionExpression!
                 : string.Empty;
@@ -464,7 +502,7 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
                 ResourcePath = alarmPath,
                 TargetResourcePath = targetPath,
                 TagId = tagId,
-                TagName = SelectedTagName?.Split('/').LastOrDefault() ?? string.Empty,
+                TagName = resolvedTagName,
                 AlarmType = MapAlarmType(SelectedOperator),
                 Operator = SelectedOperator,
                 Threshold = Threshold,
@@ -475,7 +513,7 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
                 MessageTemplate = string.IsNullOrWhiteSpace(MessageTemplate)
                     ? $"{SelectedTagName?.Split('/').LastOrDefault() ?? AlarmCode} 当前值 {{Value}}，超过阈值 {Threshold}"
                     : MessageTemplate,
-                Source = SelectedResourcePath ?? string.Empty,
+                Source = targetPath?.Value ?? SelectedResourcePath ?? string.Empty,
                 IsEnabled = IsEnabled,
                 AckPolicy = AckPolicy,
                 ClearPolicy = AlarmClearPolicy.AutoClearWhenConditionFalse,
@@ -486,8 +524,8 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
 
             await _repository.UpsertAsync(def);
 
-            // 保存后自动热重载
-            await _alarmDefinitionService.ReloadAsync();
+            // 保存后重建规则工作流快照，确保运行时立即使用最新配置。
+            await _ruleEngineService.ReloadAsync();
 
             PublishNotification("保存成功",
                 $"规则 {def.RuleId} [{def.AlarmCode}] 已保存并自动生效。",
@@ -509,7 +547,8 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
             try
             {
                 await _repository.DisableAsync(SelectedRule.RuleId);
-                await _alarmDefinitionService.ReloadAsync();
+                // 禁用规则后同步替换运行时快照，避免旧规则继续接收数据。
+                await _ruleEngineService.ReloadAsync();
                 PublishNotification("删除成功", $"规则 {SelectedRule.RuleId} 已禁用并热重载。", NotificationType.Success);
                 await LoadRulesAsync();
                 SelectedRule = null;
@@ -526,7 +565,8 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
     {
         try
         {
-            await _alarmDefinitionService.ReloadAsync();
+            // 手工重载也必须经过规则引擎，定义快照和已编译工作流保持一致。
+            await _ruleEngineService.ReloadAsync();
             PublishNotification("热重载成功", "底层报警规则引擎已重新编译并生效。", NotificationType.Success);
         }
         catch (Exception ex)
@@ -539,7 +579,10 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
     {
         RuleId = def.RuleId;
         SelectedResourcePath = def.TargetResourcePath?.Value ?? def.ResourcePath?.Value;
-        SelectedTagName = def.TagName;
+        // 历史自定义规则可能没有 TagName，使用目标资源路径末段作为兼容值。
+        SelectedTagName = !string.IsNullOrWhiteSpace(def.TagName)
+            ? def.TagName
+            : def.TargetResourcePath?.Value.Split('/').LastOrDefault();
         _resolvedTagId = def.TagId;
         SelectedOperator = def.Operator;
         Threshold = def.Threshold;

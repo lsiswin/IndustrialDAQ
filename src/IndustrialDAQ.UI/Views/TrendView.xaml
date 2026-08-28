@@ -11,6 +11,7 @@
     <Grid Margin="20" Background="{DynamicResource MainBgBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -19,15 +20,116 @@
         <Border Grid.Row="0" Background="{DynamicResource CardBgBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                 CornerRadius="8" Padding="16,10" Margin="0,0,0,14">
-            <DockPanel>
-                <!-- 标题 -->
-                <TextBlock Text="趋势监控" FontSize="16" FontWeight="SemiBold"
-                           Foreground="{DynamicResource TextPrimaryBrush}"
-                           VerticalAlignment="Center" DockPanel.Dock="Left" Margin="0,0,28,0"/>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left"
+                <!-- 第一行：标题、实时数据点选择和模式控制。 -->
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="趋势监控" FontSize="16" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}"
+                               VerticalAlignment="Center" Margin="0,0,28,0"/>
+
+                    <!-- 固定尺寸弹出面板不会撑高工具栏，设备和数据点区域分别独立滚动。 -->
+                    <Grid Grid.Column="1" Margin="0,0,18,0"
+                          Visibility="{Binding IsRealTimeMode, Converter={StaticResource BoolToVisibility}}">
+                        <ToggleButton x:Name="TagSelectorToggle" Width="190" Height="32"
+                                      HorizontalAlignment="Left" Padding="10,4"
+                                      Content="{Binding SelectedTagSummary}"
+                                      Foreground="{DynamicResource TextPrimaryBrush}"
+                                      Background="{DynamicResource CardBgBrush}"
+                                      BorderBrush="{DynamicResource BorderBrush}" Cursor="Hand"/>
+
+                        <Popup IsOpen="{Binding IsChecked, ElementName=TagSelectorToggle, Mode=TwoWay}"
+                               PlacementTarget="{Binding ElementName=TagSelectorToggle}"
+                               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                            <Border Width="640" Height="230" Background="{DynamicResource CardBgBrush}"
+                                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                    CornerRadius="6" Padding="12" Margin="0,5,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="230"/>
+                                    <ColumnDefinition Width="1"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                                    <TextBlock Text="1. 选择设备" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="4,0,0,6"/>
+                                    <ListBox ItemsSource="{Binding AvailableDevices}"
+                                             SelectedItem="{Binding SelectedDevice, Mode=TwoWay}"
+                                             DisplayMemberPath="DisplayText" Height="174" BorderThickness="0"
+                                             Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}"
+                                             ScrollViewer.VerticalScrollBarVisibility="Visible"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                                </StackPanel>
+
+                                <Border Grid.Column="1" Background="{DynamicResource BorderBrush}"/>
+
+                                <StackPanel Grid.Column="2" Margin="12,0,0,0">
+                                    <TextBlock Text="2. 勾选数值数据点" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="4,0,0,6"/>
+                                    <TextBlock Text="{Binding SelectedDevice.ResourcePath, StringFormat=资源路径：{0}}"
+                                               Foreground="{DynamicResource TextMutedBrush}" FontSize="11"
+                                               TextTrimming="CharacterEllipsis" Margin="4,0,0,5"/>
+                                    <ScrollViewer Height="150" VerticalScrollBarVisibility="Visible"
+                                                  HorizontalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding SelectedDevice.Tags}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                              Foreground="{DynamicResource TextPrimaryBrush}"
+                                                              Margin="4,5" ToolTip="{Binding ResourcePath}"
+                                                              Command="{Binding DataContext.ToggleTagCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                              CommandParameter="{Binding}">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Border Width="9" Height="9" CornerRadius="5"
+                                                                    Background="{Binding Color}" Margin="0,0,7,0"/>
+                                                            <TextBlock Text="{Binding TagName}"/>
+                                                            <TextBlock Text="{Binding Unit, StringFormat=  ({0})}"
+                                                                       Foreground="{DynamicResource TextMutedBrush}"/>
+                                                        </StackPanel>
+                                                    </CheckBox>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Grid>
+                            </Border>
+                        </Popup>
+                    </Grid>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Command="{Binding TogglePauseCommand}" Margin="0,0,8,0"
+                                Visibility="{Binding IsRealTimeMode, Converter={StaticResource BoolToVisibility}}"
+                                Padding="14,7" Background="{DynamicResource AccentBrush}" Foreground="White"
+                                BorderThickness="0" Cursor="Hand">
+                            <TextBlock Text="{Binding PauseButtonText}" VerticalAlignment="Center"/>
+                        </Button>
+
+                        <Button Command="{Binding SwitchModeCommand}" Padding="14,7"
+                                Background="{DynamicResource InfoBrush}" Foreground="White"
+                                BorderThickness="0" Cursor="Hand">
+                            <TextBlock Text="{Binding ModeButtonText}" VerticalAlignment="Center"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+
+                <!-- 第二行：历史模式专属查询条件，默认查询当前已选数据点。 -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal"
                             Visibility="{Binding IsHistoryMode, Converter={StaticResource BoolToVisibility}}"
-                            VerticalAlignment="Center" Margin="0,0,18,0">
+                            VerticalAlignment="Center" Margin="0,12,0,0">
+                    <TextBlock Text="历史查询范围" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center" Margin="0,0,14,0"/>
                     <TextBlock Text="开始" Foreground="{DynamicResource TextSecondaryBrush}"
                                VerticalAlignment="Center" Margin="0,0,5,0"/>
                     <DatePicker SelectedDate="{Binding HistoryStart, Mode=TwoWay}" Width="118" Margin="0,0,6,0"/>
@@ -41,76 +143,91 @@
                     <Button Content="近15分钟" Command="{Binding SetLast15MinCommand}"
                             Padding="8,5" Margin="0,0,4,0"/>
                     <Button Content="近1小时" Command="{Binding SetLastHourCommand}"
+                            Padding="8,5" Margin="0,0,4,0"/>
+                    <Button Content="近4小时" Command="{Binding SetLast4HourCommand}"
+                            Padding="8,5" Margin="0,0,4,0"/>
+                    <Button Content="近24小时" Command="{Binding SetLast24HourCommand}"
                             Padding="8,5"/>
                 </StackPanel>
+            </Grid>
+        </Border>
 
-                <!-- 控制按钮 -->
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <!-- 暂停/恢复 -->
-                    <Button Command="{Binding TogglePauseCommand}" Margin="0,0,8,0"
-                            Padding="14,7" Background="{DynamicResource AccentBrush}" Foreground="White"
-                            BorderThickness="0" Cursor="Hand">
-                        <TextBlock Text="{Binding PauseButtonText}" VerticalAlignment="Center"/>
-                    </Button>
+        <!-- 设备连接提醒不会阻止历史查询。 -->
+        <Border Grid.Row="1" Visibility="{Binding HasConnectionWarning, Converter={StaticResource BoolToVisibility}}"
+                Background="{DynamicResource WarningBgBrush}" BorderBrush="{DynamicResource WarningBrush}"
+                BorderThickness="1" CornerRadius="6" Padding="12,8" Margin="0,0,0,12">
+            <TextBlock Text="{Binding ConnectionWarningText}" Foreground="{DynamicResource WarningBrush}"
+                       TextWrapping="Wrap"/>
+        </Border>
 
-                    <!-- 实时/历史切换 -->
-                    <Button Command="{Binding SwitchModeCommand}" Margin="0,0,8,0"
-                            Padding="14,7" Background="{DynamicResource InfoBrush}" Foreground="White"
-                            BorderThickness="0" Cursor="Hand">
-                        <TextBlock Text="{Binding ModeButtonText}" VerticalAlignment="Center"/>
-                    </Button>
-                </StackPanel>
+        <!-- ═══ 趋势图表 ═══ -->
+        <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="190"/>
+                </Grid.ColumnDefinitions>
 
-                <!-- Tag 选择列表 -->
-                <Expander DockPanel.Dock="Left" Margin="0,0,18,0"
-                          VerticalAlignment="Center" Header="{Binding SelectedTagSummary}"
-                          Foreground="{DynamicResource TextPrimaryBrush}">
-                    <Border Background="{DynamicResource CardBgBrush}"
-                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                            CornerRadius="6" Padding="10" Margin="0,6,0,0">
-                        <ScrollViewer Width="420" MaxHeight="180"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled">
-                            <ItemsControl ItemsSource="{Binding AvailableTags}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
+                <Grid x:Name="TrendChartHost" Grid.Column="0">
+                    <lvc:CartesianChart x:Name="TrendChart" Series="{Binding Series}"
+                                    XAxes="{Binding XAxes}" YAxes="{Binding YAxes}"
+                                    LegendPosition="Hidden"
+                                    LegendTextPaint="{Binding LegendPaint}"
+                                    TooltipTextPaint="{Binding LegendPaint}"
+                                    AnimationsSpeed="00:00:00.15" ZoomMode="None"
+                                    TooltipPosition="Top" Margin="4"
+                                    MouseMove="OnTrendChartMouseMove"
+                                    MouseLeave="OnTrendChartMouseLeave"/>
+
+                <!-- 十字线仅用于视觉对齐，鼠标事件仍由图表处理以显示原生数据提示。 -->
+                    <Canvas IsHitTestVisible="False" ClipToBounds="True">
+                        <Line x:Name="CrosshairVertical" Visibility="Collapsed"
+                              Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="1" StrokeDashArray="3,3"/>
+                        <Line x:Name="CrosshairHorizontal" Visibility="Collapsed"
+                              Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="1" StrokeDashArray="3,3"/>
+                    </Canvas>
+                </Grid>
+
+                <!-- 常驻图例独立于图表悬浮状态，颜色直接绑定曲线配置。 -->
+                <Border Grid.Column="1" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,0,0,0"
+                        Padding="14,12" Background="{DynamicResource CardBgBrush}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="当前趋势" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,10"/>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding SelectedTags}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <CheckBox Content="{Binding TagName}"
-                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                  Foreground="{DynamicResource TextPrimaryBrush}"
-                                                  Margin="0,4,18,4" MinWidth="150"
-                                                  Command="{Binding DataContext.ToggleTagCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                  CommandParameter="{Binding}"/>
+                                        <Grid Margin="0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Grid.Column="0" VerticalAlignment="Center">
+                                                <Rectangle Height="3" Fill="{Binding Color}"/>
+                                                <Ellipse Width="8" Height="8" Fill="{Binding Color}"
+                                                         HorizontalAlignment="Center"/>
+                                            </Grid>
+                                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                                <TextBlock Text="{Binding TagName}" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                                <TextBlock Text="{Binding DeviceName}" FontSize="11"
+                                                           Foreground="{DynamicResource TextMutedBrush}"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
-                    </Border>
-                </Expander>
-            </DockPanel>
-        </Border>
-
-        <!-- ═══ 趋势图表 ═══ -->
-        <Border Grid.Row="1" Background="{DynamicResource CardBgBrush}"
-                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="10">
-            <lvc:CartesianChart Series="{Binding Series}"
-                                XAxes="{Binding XAxes}"
-                                YAxes="{Binding YAxes}"
-                                LegendPosition="Right"
-                                LegendTextPaint="{Binding LegendPaint}"
-                                TooltipTextPaint="{Binding LegendPaint}"
-                                AnimationsSpeed="00:00:00.15"
-                                ZoomMode="None"
-                                TooltipPosition="Hidden"
-                                Margin="4"/>
+                    </DockPanel>
+                </Border>
+            </Grid>
         </Border>
 
         <!-- ═══ 底部状态栏 ═══ -->
-        <Border Grid.Row="2" Background="{DynamicResource CardBgBrush}"
+        <Border Grid.Row="3" Background="{DynamicResource CardBgBrush}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                 CornerRadius="6" Padding="14,8" Margin="0,14,0,0">
             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextMutedBrush}"

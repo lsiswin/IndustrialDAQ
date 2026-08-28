@@ -29,6 +29,14 @@ public sealed class TagPoint
     /// <summary>访问权限 — 只读、只写或读写。</summary>
     public TagAccess Access { get; init; } = TagAccess.Read;
 
+    /// <summary>
+    /// 寄存器内位索引（0-15）。仅当 <see cref="DataType"/> 为 <see cref="TagDataType.Bool"/>
+    /// 且地址指向保持/输入寄存器（HR/IR）时生效：
+    /// 读取时提取该位的值，写入时执行“读-改-写”以保留同一寄存器的其他位。
+    /// 默认 -1 表示不启用位访问（按整寄存器处理）。
+    /// </summary>
+    public int BitIndex { get; init; } = -1;
+
     /// <summary>Description for documentation purposes.</summary>
     public string Description { get; init; } = string.Empty;
 

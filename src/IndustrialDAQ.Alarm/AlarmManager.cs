@@ -111,12 +111,15 @@ public sealed class AlarmManager : IHostedService
     }
 
     /// <summary>
-    /// 获取实时报警列表。
+    /// 获取报警条件仍然成立的实时报警列表。
+    /// 已清除但等待操作员确认的记录仍由报警中心保留，供报警日志和确认流程使用，
+    /// 但不能继续计入活动报警或驱动趋势图红色标记。
     /// </summary>
     public IReadOnlyList<AlarmRecord> GetActiveAlarms()
     {
         return _alarmCenter
             .GetCurrentAlarms()
+            .Where(static alarm => alarm.Status is AlarmStatus.Active or AlarmStatus.Acknowledged)
             .OrderByDescending(a => a.OccurredAt)
             .ToList()
             .AsReadOnly();
@@ -146,12 +149,18 @@ public sealed class AlarmManager : IHostedService
     }
 
     /// <inheritdoc />
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
+        // 先结束上次进程遗留的活跃记录，再开始接收本次 Runtime 的报警事件。
+        // 如果实时条件仍成立，规则引擎会创建新的唯一报警周期。
+        var runtimeStartedAtUtc = DateTime.UtcNow;
+        await _repository
+            .ReconcileOrphanedActiveAlarmsAsync(runtimeStartedAtUtc, cancellationToken)
+            .ConfigureAwait(false);
+
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _consumeTask = Task.Run(() => ConsumeEventsAsync(_cts.Token), _cts.Token);
         _logger.LogInformation("报警管理门面已启动，事件源切换到 AlarmCenter");
-        return Task.CompletedTask;
     }
 
     /// <inheritdoc />

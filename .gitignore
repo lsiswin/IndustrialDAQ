@@ -362,5 +362,17 @@ MigrationBackup/
 .claude/
 .config/
 
+# Codex / local agent generated files
+.codex-build*/
+.uploads/
+.workbuddy/
+
+# Local runtime data
+industrialdaq.db
+industrialdaq.db-shm
+industrialdaq.db-wal
+*.db-shm
+*.db-wal
+
 # Fody - auto-generated XML schema
 FodyWeavers.xsd

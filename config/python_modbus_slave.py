@@ -20,9 +20,10 @@ WORD_ORDER = Endian.LITTLE
 
 # 模拟参数
 TANK_CAPACITY = 1000.0          # 罐体容量 L
-FILL_RATE = 50.0                # 灌装速度 L/s
-DRAIN_RATE = 30.0               # 排放速度 L/s
+FILL_RATE = 80.0                # 灌装速度 L/s，便于测试时快速跨越报警阈值
+DRAIN_RATE = 100.0              # 排放速度 L/s
 CONVEYOR_MAX_SPEED = 15.0       # 传送带最大速度 m/min
+AUTO_DEMO = True                # 无需客户端写启动命令，自动循环灌装用于报警测试
 
 class ProductionLineSimulator:
     """产线模拟器：模拟真实的罐装生产线运行"""
@@ -40,7 +41,7 @@ class ProductionLineSimulator:
         # 控制指令和设定参数 - 可写 (Write)
         self.cmd_start = False      # 启动 (00001)
         self.cmd_stop = False       # 停止 (00002)
-        self.cmd_auto = False       # 自动 (00003)
+        self.cmd_auto = AUTO_DEMO   # 自动模式默认开启，保证测试数据持续变化
         self.cmd_estop = False      # 急停 (00004)
         self.set_level = 500.0      # 设定液位 (40001)
         self.set_speed = 10.0       # 设定速度 (40003)
@@ -50,14 +51,14 @@ class ProductionLineSimulator:
         
     def update(self, dt=1.0):
         """状态更新逻辑"""
-        # 1. 响应主站 (C#) 写入的控制指令
+        # 1. 响应主站写入的控制指令；测试模式下默认保持自动运行。
         if self.cmd_estop:
             self.running = False
             self.alarm_active = True
         elif self.cmd_stop:
             self.running = False
             self.alarm_active = False
-        elif self.cmd_start or self.cmd_auto:
+        elif self.cmd_start or self.cmd_auto or AUTO_DEMO:
             self.running = True
             self.alarm_active = False
 
@@ -85,15 +86,17 @@ class ProductionLineSimulator:
             self.valve_open = True
             
         if self.filling:
-            self.level = min(self.level + FILL_RATE * dt, self.set_level + 10)
-            if self.level >= self.set_level:
+            # 始终使用主站写入的设定液位；自动演示只负责自动运行，不能覆盖工艺设定值。
+            target_level = max(0.0, min(self.set_level, TANK_CAPACITY))
+            self.level = min(self.level + FILL_RATE * dt, target_level)
+            if self.level >= target_level:
                 self.filling = False
                 self.valve_open = False
                 self.total_count += 1
                     
         # 4. 传送带带走液体消耗逻辑
-        if not self.filling and self.level > 0 and self.speed > 1.0:
-            self.level = max(self.level - DRAIN_RATE * dt * (self.speed / CONVEYOR_MAX_SPEED), 0)
+        if not self.filling and self.level > 0:
+            self.level = max(self.level - DRAIN_RATE * dt, 0)
             
         # 随机波动增加真实感
         self.level += random.uniform(-1.0, 1.0)
@@ -111,14 +114,23 @@ def int_to_registers(value):
     builder.add_32bit_int(value)
     return builder.to_registers()
 
+def pack_bits(*states):
+    """将多个布尔状态打包到一个 Holding Register，与 JSON 的 bitIndex 对齐。"""
+    register_value = 0
+    for bit_index, state in enumerate(states):
+        if state:
+            register_value |= 1 << bit_index
+    return register_value
+
 def simulate_data(context, simulator):
     """后台线程：动态更新与读取 Modbus 数据区"""
     slave_id = 1
     store = context[slave_id]
     
-    # 启动时先将默认设定值写入 Holding Registers，防止主站读取到 0
+    # JSON 当前全部使用 Holding Register：40001 对应内部偏移 0。
     store.setValues(3, 0, float_to_registers(simulator.set_level))
     store.setValues(3, 2, float_to_registers(simulator.set_speed))
+    store.setValues(3, 12, [pack_bits(False, False, AUTO_DEMO, False)])
     
     while True:
         time.sleep(1.0)
@@ -127,12 +139,12 @@ def simulate_data(context, simulator):
             # 接收端 (Write Access): 读取主站写入的数据
             # ==========================================
             
-            # 读取 Coils (00001 - 00004) -> Pymodbus fc=1, start=0, count=4
-            coils = store.getValues(1, 0, 4)
-            simulator.cmd_start = coils[0]
-            simulator.cmd_stop = coils[1]
-            simulator.cmd_auto = coils[2]
-            simulator.cmd_estop = coils[3]
+            # 40013 对应偏移 12，四个控制命令由 bitIndex 0~3 表示。
+            control_word = store.getValues(3, 12, 1)[0]
+            simulator.cmd_start = bool(control_word & 0x0001)
+            simulator.cmd_stop = bool(control_word & 0x0002)
+            simulator.cmd_auto = bool(control_word & 0x0004) or AUTO_DEMO
+            simulator.cmd_estop = bool(control_word & 0x0008)
             
             # 读取 Holding Registers (40001 - 40004) -> Pymodbus fc=3, start=0, count=4
             hr_values = store.getValues(3, 0, 4)
@@ -150,16 +162,15 @@ def simulate_data(context, simulator):
             # 发送端 (Read Access): 更新物理状态供主站读取
             # ==========================================
             
-            # 更新 Discrete Inputs (10001 - 10004) -> Pymodbus fc=2, start=0
-            store.setValues(2, 0, [simulator.running])           # 10001: Line.Running
-            store.setValues(2, 1, [simulator.alarm_active])      # 10002: Line.AlarmActive
-            store.setValues(2, 2, [simulator.valve_open])        # 10003: Filling.ValveOpen
-            store.setValues(2, 3, [simulator.conveyor_running])  # 10004: Conveyor.Running
-            
-            # 更新 Input Registers (30001 - 30006) -> Pymodbus fc=4, start=0
-            store.setValues(4, 0, float_to_registers(simulator.level))     # 30001: ActualLevel
-            store.setValues(4, 2, float_to_registers(simulator.speed))     # 30003: ActualSpeed
-            store.setValues(4, 4, int_to_registers(simulator.total_count)) # 30005: TotalCount
+            # 严格匹配 production-line.json 的 Holding Register 偏移。
+            store.setValues(3, 5, float_to_registers(simulator.level))      # 40006-40007: ActualLevel
+            store.setValues(3, 7, float_to_registers(simulator.speed))      # 40008-40009: ActualSpeed
+            store.setValues(3, 9, int_to_registers(simulator.total_count))  # 40010-40011: TotalCount
+            store.setValues(3, 13, [pack_bits(
+                simulator.running,
+                simulator.alarm_active,
+                simulator.valve_open,
+                simulator.conveyor_running)])                              # 40014: 状态位
             
             logger.info(f"状态: 运行={simulator.running}, 液位={simulator.level:.1f}L, "
                        f"设定液位={simulator.set_level:.1f}L, 实际速度={simulator.speed:.1f}m/min, "
@@ -189,8 +200,9 @@ def run_slave():
     logger.info("=" * 50)
     logger.info("Modbus TCP Slave 模拟器启动")
     logger.info("监听: 127.0.0.1:502")
-    logger.info("字节序: Float32/Int32 - Little Endian (匹配 C#)")
-    logger.info("支持控制模式: C# 主站现可通过 Coils 和 HR 发送命令和修改设定值")
+    logger.info("寄存器布局: production-line.json Holding Register 40001-40014")
+    logger.info("字节序: 低字在前，匹配 C# ModbusTcpDriver")
+    logger.info("自动演示: 自动启停循环，最高液位严格服从 SetLevel 写入值")
     logger.info("=" * 50)
     
     StartTcpServer(context=context, address=("127.0.0.1", 502))

@@ -2,6 +2,7 @@
 using System.Net.Sockets;
 using IndustrialDAQ.Core.Interfaces;
 using IndustrialDAQ.Core.Models;
+using Modbus;
 using Modbus.Device;
 
 namespace Drivers.Modbus;
@@ -52,6 +53,23 @@ public sealed class ModbusTcpDriver : IProtocolDriver
         await _tcpClient.ConnectAsync(_ipAddress, _port, ct);
         _master = ModbusIpMaster.CreateIp(_tcpClient);
         _connected = true;
+
+        // ── Modbus 层握手探测（非致命） ──
+        // 对 S7 MB_SERVER，TCP 能连上 502 端口本身就证明 MB_SERVER 在监听；
+        // 此探测仅作协议栈活性检查。失败不阻断连接，避免慢速/抖动网络下
+        // 误判为假连接；真正的"假成功"由 WriteTagAsync 的写后回读校验捕获。
+        try
+        {
+            await _master.ReadHoldingRegistersAsync(_slaveId, 0, 1);
+        }
+        catch (SlaveException)
+        {
+            // 从机回应了异常帧 → 协议栈正常
+        }
+        catch
+        {
+            // 探测失败（超时/IO 等），忽略：TCP 已建立即视为可用。
+        }
     }
 
     public Task DisconnectAsync(CancellationToken ct = default)
@@ -98,31 +116,63 @@ public sealed class ModbusTcpDriver : IProtocolDriver
                     ushort start = range.StartAddress;
                     ushort count = range.Count;
 
-                    ushort[] rawValues = functionCode switch
+                    ushort[] rawValues;
+                    try
                     {
-                        ModbusFunctionCode.ReadCoils =>
-                            (await _master.ReadCoilsAsync(_slaveId, start, count))
-                            .Select(b => b ? (ushort)1 : (ushort)0).ToArray(),
+                        rawValues = functionCode switch
+                        {
+                            ModbusFunctionCode.ReadCoils =>
+                                (await _master.ReadCoilsAsync(_slaveId, start, count))
+                                .Select(b => b ? (ushort)1 : (ushort)0).ToArray(),
 
-                        ModbusFunctionCode.ReadDiscreteInputs =>
-                            (await _master.ReadInputsAsync(_slaveId, start, count))
-                            .Select(b => b ? (ushort)1 : (ushort)0).ToArray(),
+                            ModbusFunctionCode.ReadDiscreteInputs =>
+                                (await _master.ReadInputsAsync(_slaveId, start, count))
+                                .Select(b => b ? (ushort)1 : (ushort)0).ToArray(),
 
-                        ModbusFunctionCode.ReadInputRegisters =>
-                            await _master.ReadInputRegistersAsync(_slaveId, start, count),
+                            ModbusFunctionCode.ReadInputRegisters =>
+                                await _master.ReadInputRegistersAsync(_slaveId, start, count),
 
-                        ModbusFunctionCode.ReadHoldingRegisters =>
-                            await _master.ReadHoldingRegistersAsync(_slaveId, start, count),
+                            ModbusFunctionCode.ReadHoldingRegisters =>
+                                await _master.ReadHoldingRegistersAsync(_slaveId, start, count),
 
-                        _ => throw new NotSupportedException($"不支持的功能码: {functionCode}")
-                    };
+                            _ => throw new NotSupportedException($"不支持的功能码: {functionCode}")
+                        };
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        if (ex is IOException or SocketException or ObjectDisposedException or TimeoutException)
+                        {
+                            _connected = false;
+                            throw; // 传输层故障，交由外层统一处理
+                        }
+
+                        // 协议层拒绝（如地址越界 SlaveException）：批量读失败不拖垮整组，
+                        // 降级为逐标签单点读取，隔离坏点，其余标签仍可取到值。
+                        foreach (var (tag, entry) in range.Tags)
+                        {
+                            TagValue? single = await ReadSingleTagAsync(tag, entry, timestamp);
+                            if (single is not null)
+                                resultMap[tag.Id] = single;
+                        }
+                        continue;
+                    }
 
                     foreach (var (tag, entry) in range.Tags)
                     {
                         int offset = entry.StartAddress - start;
-                        object? value = functionCode is ModbusFunctionCode.ReadCoils or ModbusFunctionCode.ReadDiscreteInputs
-                            ? rawValues[offset] == 1
-                            : ExtractTypedValue(rawValues, offset, tag.DataType);
+                        object? value;
+                        if (functionCode is ModbusFunctionCode.ReadCoils or ModbusFunctionCode.ReadDiscreteInputs)
+                        {
+                            value = rawValues[offset] == 1;
+                        }
+                        else if (tag.DataType == TagDataType.Bool && tag.BitIndex >= 0)
+                        {
+                            value = ((rawValues[offset] >> tag.BitIndex) & 1) == 1;
+                        }
+                        else
+                        {
+                            value = ExtractTypedValue(rawValues, offset, tag.DataType);
+                        }
 
                         resultMap[tag.Id] = new TagValue
                         {
@@ -166,6 +216,52 @@ public sealed class ModbusTcpDriver : IProtocolDriver
             .ToList();
     }
 
+    /// <summary>
+    /// 单标签单点读取：批量读取失败（如地址越界 SlaveException）时降级使用，
+    /// 隔离坏点，避免一个坏地址拖垮整组标签。
+    /// 成功返回 TagValue，失败返回 null（保持 Bad 状态）。
+    /// </summary>
+    private async Task<TagValue?> ReadSingleTagAsync(
+        TagPoint tag, ModbusAddressEntry entry, DateTimeOffset timestamp)
+    {
+        try
+        {
+            object? value;
+            if (entry.FunctionCode is ModbusFunctionCode.ReadCoils or ModbusFunctionCode.ReadDiscreteInputs)
+            {
+                bool[] bits = entry.FunctionCode == ModbusFunctionCode.ReadCoils
+                    ? await _master!.ReadCoilsAsync(_slaveId, entry.StartAddress, 1)
+                    : await _master!.ReadInputsAsync(_slaveId, entry.StartAddress, 1);
+                value = bits.Length > 0 && bits[0];
+            }
+            else
+            {
+                ushort regCount = (ushort)RegistersNeeded(tag.DataType);
+                ushort[] regs = entry.FunctionCode == ModbusFunctionCode.ReadInputRegisters
+                    ? await _master!.ReadInputRegistersAsync(_slaveId, entry.StartAddress, regCount)
+                    : await _master!.ReadHoldingRegistersAsync(_slaveId, entry.StartAddress, regCount);
+
+                value = tag.DataType == TagDataType.Bool && tag.BitIndex >= 0
+                    ? regs.Length > 0 && ((regs[0] >> tag.BitIndex) & 1) == 1
+                    : ExtractTypedValue(regs, 0, tag.DataType);
+            }
+
+            return new TagValue
+            {
+                TagId = tag.Id,
+                TagName = tag.Name,
+                Value = value,
+                Quality = Quality.Good,
+                Timestamp = timestamp,
+                DataType = MapToType(tag.DataType)
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public async Task WriteTagAsync(TagPoint tag, object value, CancellationToken ct = default)
     {
         if (!_connected || _master is null)
@@ -182,23 +278,53 @@ public sealed class ModbusTcpDriver : IProtocolDriver
             switch (entry.FunctionCode)
             {
                 case ModbusFunctionCode.ReadCoils:
-                    if (value is bool b)
-                        await _master.WriteSingleCoilAsync(_slaveId, entry.StartAddress, b);
-                    else
-                        await _master.WriteSingleCoilAsync(_slaveId, entry.StartAddress, Convert.ToBoolean(value));
+                    bool coilValue = value is bool coilBool ? coilBool : Convert.ToBoolean(value);
+                    await _master.WriteSingleCoilAsync(_slaveId, entry.StartAddress, coilValue);
+                    // 写后回读校验：确认从机确实把线圈置位/复位，杜绝"协议 ACK 但数据未生效"的假成功
+                    await VerifyCoilWriteAsync(tag, entry.StartAddress, coilValue);
                     break;
 
                 case ModbusFunctionCode.ReadHoldingRegisters:
-                    ushort[] registerValues = PackRegisterValues(value, tag.DataType);
-                    if (registerValues.Length == 1)
-                        await _master.WriteSingleRegisterAsync(_slaveId, entry.StartAddress, registerValues[0]);
+                    if (tag.DataType == TagDataType.Bool && tag.BitIndex >= 0)
+                    {
+                        // 按位写入：先读当前寄存器，仅翻转目标位，再写回，保留同寄存器其他位
+                        ushort current = (await _master.ReadHoldingRegistersAsync(_slaveId, entry.StartAddress, 1))[0];
+                        bool bit = value is bool vb ? vb : Convert.ToBoolean(value);
+                        ushort updated = bit
+                            ? (ushort)(current | (1 << tag.BitIndex))
+                            : (ushort)(current & ~(1 << tag.BitIndex));
+                        await _master.WriteSingleRegisterAsync(_slaveId, entry.StartAddress, updated);
+
+                        // 写后回读校验（按位比对）
+                        ushort verifyReg = (await _master.ReadHoldingRegistersAsync(_slaveId, entry.StartAddress, 1))[0];
+                        bool verifyBit = ((verifyReg >> tag.BitIndex) & 1) == 1;
+                        if (verifyBit != bit)
+                            throw new InvalidOperationException(
+                                $"写入回读校验失败: 标签 [{tag.Name}] 位 {tag.BitIndex} 期望 {bit}，实际 {verifyBit} (寄存器 0x{verifyReg:X4})");
+                    }
                     else
-                        await _master.WriteMultipleRegistersAsync(_slaveId, entry.StartAddress, registerValues);
+                    {
+                        ushort[] registerValues = PackRegisterValues(value, tag.DataType);
+                        if (registerValues.Length == 1)
+                            await _master.WriteSingleRegisterAsync(_slaveId, entry.StartAddress, registerValues[0]);
+                        else
+                            await _master.WriteMultipleRegistersAsync(_slaveId, entry.StartAddress, registerValues);
+
+                        // 写后回读校验（整寄存器比对）
+                        await VerifyRegisterWriteAsync(tag, entry.StartAddress, registerValues);
+                    }
                     break;
 
                 default:
                     throw new NotSupportedException($"不支持写入功能码 {entry.FunctionCode}");
             }
+        }
+        catch (SlaveException ex)
+        {
+            // 从机返回 Modbus 异常帧（如 IllegalDataAddress=0x02）：连接仍有效，是请求本身被拒绝。
+            // 包装成直观信息，让 UI 能显示"从机拒绝"而不是笼统的异常。
+            throw new InvalidOperationException(
+                $"Modbus 从机拒绝写入请求 (异常码 {ex.SlaveExceptionCode}): {ex.Message}", ex);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -207,6 +333,34 @@ public sealed class ModbusTcpDriver : IProtocolDriver
                 _connected = false;
             }
             throw;
+        }
+    }
+
+    // ─── 写后回读校验 ───
+
+    /// <summary>
+    /// 写线圈后回读校验：确认从机确实把线圈置位/复位。
+    /// </summary>
+    private async Task VerifyCoilWriteAsync(TagPoint tag, ushort coilAddress, bool expected)
+    {
+        bool[] actual = await _master!.ReadCoilsAsync(_slaveId, coilAddress, 1);
+        bool actualValue = actual.Length > 0 && actual[0];
+        if (actualValue != expected)
+            throw new InvalidOperationException(
+                $"写入回读校验失败: 标签 [{tag.Name}] 线圈 {coilAddress + 1} 期望 {expected}，实际 {actualValue}");
+    }
+
+    /// <summary>
+    /// 写寄存器后回读校验：逐个寄存器比对写入值。
+    /// </summary>
+    private async Task VerifyRegisterWriteAsync(TagPoint tag, ushort startAddress, ushort[] expected)
+    {
+        ushort[] actual = await _master!.ReadHoldingRegistersAsync(_slaveId, startAddress, (ushort)expected.Length);
+        for (int i = 0; i < expected.Length; i++)
+        {
+            if (actual[i] != expected[i])
+                throw new InvalidOperationException(
+                    $"写入回读校验失败: 标签 [{tag.Name}] 寄存器 {startAddress + i} 期望 0x{expected[i]:X4}，实际 0x{actual[i]:X4}");
         }
     }
 

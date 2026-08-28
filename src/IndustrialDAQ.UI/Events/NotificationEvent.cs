@@ -17,6 +17,9 @@ public class NotificationMessage
     public NotificationType Type { get; set; } = NotificationType.Info;
     public int DurationMs { get; set; } = 3000;
 
+    /// <summary>通知关联键，用于合并同一报警规则的重复弹窗。</summary>
+    public string? CorrelationKey { get; set; }
+
     /// <summary>点击后导航到的页面（可选）。</summary>
     public string? NavigateTo { get; set; }
 

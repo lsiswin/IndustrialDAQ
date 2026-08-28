@@ -1,5 +1,6 @@
 // File: DashboardViewModel.cs  Module: UI (ViewModels)  Author: IndustrialDAQ Team
 using System.Collections.ObjectModel;
+using System.Threading.Channels;
 using System.Windows;
 using IndustrialDAQ.Acquisition;
 using IndustrialDAQ.Alarm;
@@ -12,6 +13,12 @@ using LiveChartsCore.SkiaSharpView.Painting;
 using SkiaSharp;
 using Prism.Mvvm;
 using Prism.Navigation;
+using Prism.Commands;
+using Prism.Dialogs;
+using Prism.Navigation.Regions;
+using IndustrialDAQ.UI.Services;
+using Prism.Events;
+using IndustrialDAQ.UI.Events;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
@@ -24,7 +31,15 @@ public class DashboardViewModel : BindableBase, IDestructible
     private readonly RealTimeStore _realTimeStore;
     private readonly AcquisitionHost _acquisitionHost;
     private readonly AlarmManager _alarmManager;
+    private readonly IAuthManager _authManager;
+    private readonly IDialogService _dialogService;
+    private readonly IEventAggregator _eventAggregator;
     private CancellationTokenSource? _cts;
+    private ChannelReader<TagValue>? _realtimeReader;
+    private readonly Dictionary<string, StationModel> _stationLookup = new(StringComparer.OrdinalIgnoreCase);
+    private bool _lineRunning;
+    private bool _lineAlarmActive;
+    private bool _valveOpen;
 
     // ─── 顶部属性 ───
 
@@ -49,6 +64,22 @@ public class DashboardViewModel : BindableBase, IDestructible
         set => SetProperty(ref _energyConsumption, value);
     }
 
+    private double _currentLevel;
+    /// <summary>灌装液位实时值，由 mb-ir-level 驱动。</summary>
+    public double CurrentLevel
+    {
+        get => _currentLevel;
+        set => SetProperty(ref _currentLevel, value);
+    }
+
+    private double _conveyorSpeed;
+    /// <summary>传送带实时速度，由 mb-ir-speed 驱动。</summary>
+    public double ConveyorSpeed
+    {
+        get => _conveyorSpeed;
+        set => SetProperty(ref _conveyorSpeed, value);
+    }
+
     private string _systemStatus = "Running";
     public string SystemStatus
     {
@@ -56,12 +87,18 @@ public class DashboardViewModel : BindableBase, IDestructible
         set => SetProperty(ref _systemStatus, value);
     }
 
-    private string _currentUser = "Admin";
+    private string _currentUser = "访客（未登录）";
     public string CurrentUser
     {
         get => _currentUser;
         set => SetProperty(ref _currentUser, value);
     }
+
+    /// <summary>点击用户区域执行登录或退出。</summary>
+    public DelegateCommand UserSessionCommand { get; }
+
+    /// <summary>打开报警日志页面。</summary>
+    public DelegateCommand OpenAlarmLogCommand { get; }
 
     private string _currentTime = string.Empty;
     public string CurrentTime
@@ -89,19 +126,31 @@ public class DashboardViewModel : BindableBase, IDestructible
     /// 初始化仪表板 ViewModel。
     /// </summary>
     public DashboardViewModel(RealTimeStore realTimeStore, AcquisitionHost acquisitionHost,
-        AlarmManager alarmManager)
+        AlarmManager alarmManager, IAuthManager authManager, IDialogService dialogService,
+        IEventAggregator eventAggregator)
     {
         _realTimeStore = realTimeStore ?? throw new ArgumentNullException(nameof(realTimeStore));
         _acquisitionHost = acquisitionHost ?? throw new ArgumentNullException(nameof(acquisitionHost));
         _alarmManager = alarmManager ?? throw new ArgumentNullException(nameof(alarmManager));
+        _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
+        _eventAggregator = eventAggregator ?? throw new ArgumentNullException(nameof(eventAggregator));
         _cts = new CancellationTokenSource();
+
+        UserSessionCommand = new DelegateCommand(OnUserSessionExecute);
+        OpenAlarmLogCommand = new DelegateCommand(() =>
+            _eventAggregator.GetEvent<NavigationRequestEvent>().Publish("AlarmRecord"));
 
         // 订阅报警事件
         _alarmManager.AlarmTriggered += OnAlarmTriggered;
         _alarmManager.AlarmCleared += OnAlarmCleared;
         _alarmManager.ActiveAlarmsChanged += OnActiveAlarmsChanged;
+        _authManager.CurrentUserChanged += OnCurrentUserChanged;
 
-        InitializeMockData();
+        InitializeLiveStations();
+        RefreshCurrentUser();
+        ApplyRealtimeSnapshot();
+        _ = SubscribeToRealtimeDataAsync(_cts.Token);
         LoadActiveAlarms();
         StartClock(_cts.Token);
     }
@@ -113,94 +162,210 @@ public class DashboardViewModel : BindableBase, IDestructible
         _alarmManager.AlarmTriggered -= OnAlarmTriggered;
         _alarmManager.AlarmCleared -= OnAlarmCleared;
         _alarmManager.ActiveAlarmsChanged -= OnActiveAlarmsChanged;
+        _authManager.CurrentUserChanged -= OnCurrentUserChanged;
+
+        if (_realtimeReader is not null)
+        {
+            _realTimeStore.Unsubscribe(_realtimeReader);
+            _realtimeReader = null;
+        }
 
         _cts?.Cancel();
         _cts?.Dispose();
     }
 
-    private void InitializeMockData()
+    private void InitializeLiveStations()
     {
-        // 顶部卡片数据
-        TotalYield = 3847;
-        YieldRate = 98.2;
-        EnergyConsumption = 12450.5;
-
-        // 初始化工位
-        var colorGreen = new SolidColorPaint(SKColor.Parse("#10B981")) { StrokeThickness = 2 };
-        var colorYellow = new SolidColorPaint(SKColor.Parse("#F59E0B")) { StrokeThickness = 2 };
-
-        Stations.Add(new StationModel
+        // 首页只展示 production-line.json 中 Modbus-PLC 的真实生产环节。
+        AddStation(new StationModel
         {
-            StationId = "S1",
-            Name = "进瓶区 (传送带)",
-            Status = StationStatus.Running,
-            PrimaryStatName = "产量",
-            PrimaryStatValue = "856 (瓶)",
+            StationId = "line",
+            Name = "生产线",
+            Status = StationStatus.NotStarted,
+            PrimaryStatName = "模式",
+            PrimaryStatValue = "等待数据",
             PlcCount = 1
         });
 
-        Stations.Add(new StationModel
+        AddStation(new StationModel
         {
-            StationId = "S2",
-            Name = "灌装站 (电磁阀)",
-            Status = StationStatus.Running,
-            PrimaryStatName = "OEE",
-            PrimaryStatValue = "82%",
-            PlcCount = 2,
-            SparklineSeries = new ObservableCollection<ISeries>
-            {
-                new LineSeries<double>
-                {
-                    Values = new double[] { 70, 75, 82, 80, 85, 82 },
-                    GeometrySize = 0,
-                    Fill = null,
-                    Stroke = colorGreen
-                }
-            }
-        });
-
-        Stations.Add(new StationModel
-        {
-            StationId = "S3",
-            Name = "封盖站 (气缸)",
-            Status = StationStatus.Standby,
-            PrimaryStatName = "产量",
-            PrimaryStatValue = "120 (瓶)",
-            PlcCount = 2,
-            SparklineSeries = new ObservableCollection<ISeries>
-            {
-                new LineSeries<double>
-                {
-                    Values = new double[] { 100, 110, 105, 120, 118, 120 },
-                    GeometrySize = 0,
-                    Fill = null,
-                    Stroke = colorYellow
-                }
-            }
-        });
-
-        Stations.Add(new StationModel
-        {
-            StationId = "S4",
-            Name = "贴标站 (电机)",
-            Status = StationStatus.Fault,
-            PrimaryStatName = "故障代码",
-            PrimaryStatValue = "E-002",
+            StationId = "conveyor",
+            Name = "传送带",
+            Status = StationStatus.NotStarted,
+            PrimaryStatName = "速度",
+            PrimaryStatValue = "-- m/min",
             PlcCount = 1
         });
 
-        Stations.Add(new StationModel
+        AddStation(new StationModel
         {
-            StationId = "S5",
-            Name = "出瓶区 (计数)",
+            StationId = "filling",
+            Name = "灌装站",
+            Status = StationStatus.NotStarted,
+            PrimaryStatName = "液位",
+            PrimaryStatValue = "-- mL",
+            PlcCount = 1
+        });
+
+        AddStation(new StationModel
+        {
+            StationId = "counter",
+            Name = "产量计数",
             Status = StationStatus.NotStarted,
             PrimaryStatName = "产量",
             PrimaryStatValue = "0 (瓶)",
-            PlcCount = 0,
+            PlcCount = 1,
             IsLast = true
         });
+    }
 
-        // 实时报警栏（由 LoadActiveAlarms 填充真实数据）
+    private void AddStation(StationModel station)
+    {
+        Stations.Add(station);
+        _stationLookup[station.StationId] = station;
+    }
+
+    /// <summary>使用实时缓存初始化首页，避免进入页面后等待下一采集周期。</summary>
+    private void ApplyRealtimeSnapshot()
+    {
+        foreach (var value in _realTimeStore.GetAll())
+            UpdateDashboard(value);
+    }
+
+    /// <summary>订阅采集广播流，使首页与 Python Modbus 模拟器实时联动。</summary>
+    private async Task SubscribeToRealtimeDataAsync(CancellationToken ct)
+    {
+        _realtimeReader = _realTimeStore.Subscribe();
+        try
+        {
+            await foreach (var value in _realtimeReader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                Application.Current?.Dispatcher.Invoke(() => UpdateDashboard(value));
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+    }
+
+    /// <summary>将配置中的 Modbus Tag 映射到首页指标和工位状态。</summary>
+    private void UpdateDashboard(TagValue value)
+    {
+        if (value.Quality == Quality.Bad)
+        {
+            SystemStatus = "Disconnected";
+            return;
+        }
+
+        SystemStatus = _acquisitionHost.GetDevices().Count > 0 ? "Running" : "No Device";
+
+        switch (value.TagId)
+        {
+            case "mb-ir-count" when TryGetDouble(value.Value, out var count):
+                TotalYield = Math.Max(0, (int)Math.Round(count));
+                _stationLookup["counter"].PrimaryStatValue = $"{TotalYield:N0} (瓶)";
+                _stationLookup["counter"].Status = StationStatus.Running;
+                break;
+            case "mb-ir-level" when TryGetDouble(value.Value, out var level):
+                CurrentLevel = Math.Round(level, 1);
+                _stationLookup["filling"].PrimaryStatValue = $"{CurrentLevel:F1} mL";
+                break;
+            case "mb-ir-speed" when TryGetDouble(value.Value, out var speed):
+                ConveyorSpeed = Math.Round(speed, 1);
+                _stationLookup["conveyor"].PrimaryStatValue = $"{ConveyorSpeed:F1} m/min";
+                break;
+            case "mb-di-running" when TryGetBool(value.Value, out var running):
+                _lineRunning = running;
+                UpdateLineAndFillingStatus();
+                break;
+            case "mb-di-conveyor" when TryGetBool(value.Value, out var conveyorRunning):
+                _stationLookup["conveyor"].Status = conveyorRunning ? StationStatus.Running : StationStatus.Standby;
+                break;
+            case "mb-di-valve" when TryGetBool(value.Value, out var valveOpen):
+                _valveOpen = valveOpen;
+                UpdateLineAndFillingStatus();
+                break;
+            case "mb-di-alarm" when TryGetBool(value.Value, out var alarmActive):
+                _lineAlarmActive = alarmActive;
+                UpdateLineAndFillingStatus();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 根据产线运行、报警和阀门阶段统一计算灌装站状态。
+    /// 液位高低只作为过程值，不直接决定工位运行/待机。
+    /// </summary>
+    private void UpdateLineAndFillingStatus()
+    {
+        var lineStation = _stationLookup["line"];
+        var fillingStation = _stationLookup["filling"];
+
+        if (_lineAlarmActive)
+        {
+            lineStation.Status = StationStatus.Fault;
+            fillingStation.Status = StationStatus.Fault;
+            lineStation.PrimaryStatValue = "设备报警";
+            fillingStation.PrimaryStatName = "报警液位";
+            return;
+        }
+
+        lineStation.Status = _lineRunning ? StationStatus.Running : StationStatus.Standby;
+        lineStation.PrimaryStatValue = _lineRunning ? "自动运行" : "已停止";
+        fillingStation.Status = _lineRunning ? StationStatus.Running : StationStatus.Standby;
+        fillingStation.PrimaryStatName = _lineRunning
+            ? (_valveOpen ? "灌装中" : "排空中")
+            : "待机液位";
+    }
+
+    private void OnCurrentUserChanged(object? sender, EventArgs e) =>
+        Application.Current?.Dispatcher.Invoke(RefreshCurrentUser);
+
+    private void RefreshCurrentUser()
+    {
+        var user = _authManager.CurrentUser;
+        CurrentUser = user.Id == "guest"
+            ? "访客（点击登录）"
+            : $"{user.RealName}（点击退出）";
+    }
+
+    private void OnUserSessionExecute()
+    {
+        if (_authManager.CurrentUser.Id != "guest")
+        {
+            _authManager.Logout();
+            return;
+        }
+
+        _dialogService.ShowDialog("LoginDialog", result =>
+        {
+            if (result.Result == ButtonResult.OK)
+                RefreshCurrentUser();
+        });
+    }
+
+    private static bool TryGetDouble(object? value, out double result) =>
+        double.TryParse(value?.ToString(), out result);
+
+    private static bool TryGetBool(object? value, out bool result)
+    {
+        if (value is bool boolValue)
+        {
+            result = boolValue;
+            return true;
+        }
+
+        if (bool.TryParse(value?.ToString(), out result))
+            return true;
+
+        if (int.TryParse(value?.ToString(), out var number))
+        {
+            result = number != 0;
+            return true;
+        }
+
+        result = false;
+        return false;
     }
 
     /// <summary>
