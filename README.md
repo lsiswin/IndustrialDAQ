@@ -1,54 +1,134 @@
 # IndustrialDAQ
 
-IndustrialDAQ 是一款现代化的工业级数据采集与监控终端 (SCADA/HMI) 系统。本项目基于 .NET 8 WPF 和 Prism MVVM 架构开发，致力于提供高性能、可扩展且美观的数据采集解决方案。
+IndustrialDAQ 是一个基于 .NET 8、WPF 和 Prism 构建的工业数据采集与监控运行时平台，覆盖设备采集、实时监控、历史趋势、规则报警、资源树以及动态权限管理。
 
-## 🌟 核心特性
+## 核心能力
 
-- **现代 UI 架构**：采用深色/浅色全局主题热切换，基于 LiveCharts2 提供高帧率的生产过程趋势可视化。
-- **协议解耦设计**：采用插件式驱动架构（支持 Modbus TCP、OPC UA 扩展等），实现软硬件彻底解耦。
-- **高效采集引擎**：内置高性能后台采集轮询引擎，支持数据防抖、死区压缩和断线自动重连。
-- **配置热加载**：支持 `FileSystemWatcher`，当工业现场的设备或测点配置 (JSON) 变更时，可实现采集通道的无缝热重载（无需重启）。
-- **生产监控与分析**：
-  - **实时数据看板**：仪表盘（Gauge）与动态折线图（LineSeries）组件，且支持本地状态缓存。
-  - **参数下发 (写入)**：无边框弹窗组件，可直接针对具备 Write 权限的测点进行快速指令下发，自带类型推断转换。
-  - **警报拦截**：实时拦截异常数据点并做记录展示。
+- **多协议采集**：采用插件式驱动架构，已包含 Modbus TCP、OPC UA 和 S7 驱动模块。
+- **配置驱动**：设备、数据点和驱动参数由 JSON 配置加载，支持运行时热更新。
+- **资源树模型**：将设备配置同步为 `Devices/{设备}/{数据点}` 层级资源，统一供趋势、报警、写入和权限模块使用。
+- **实时与历史趋势**：支持按设备复选数值型数据点、实时滚动、历史区间查询、十字线悬浮和报警点标识。
+- **规则与报警**：规则定义支持动态加载，报警状态机负责触发、恢复、确认和历史记录。
+- **用户与权限**：账号、角色和关联关系独立持久化，按 `ResourcePath + Action` 执行动态授权。
+- **安全审计**：记录登录、登录失败、退出、权限变更、授权拒绝及数据点写入结果。
+- **主题与响应式布局**：提供深色/浅色主题，并针对不同窗口尺寸调整首页卡片和业务页面布局。
 
-## 💻 技术栈
+## 权限模型
 
-- **框架**: .NET 8.0, WPF
-- **架构**: MVVM, Prism Library (DI/EventAggregator/DialogService)
-- **图表**: LiveChartsCore.SkiaSharpView.WPF (使用高性能 Skia 渲染引擎)
-- **日志记录**: Serilog
-- **通讯驱动**: NModbus (Modbus TCP)
+系统采用默认拒绝和拒绝优先策略：
 
-## 📁 项目结构
+```text
+User + Role
+    ↓
+PermissionSubject
+    ↓
+ResourcePath + Action
+    ↓
+PermissionSnapshot
+    ↓
+Deny 优先 → 路径深度 → Priority
+    ↓
+允许业务操作 / 拒绝并写入审计日志
+```
 
-- **`IndustrialDAQ.UI`**: WPF 用户界面主程序，负责视图、主题和用户交互。
-- **`IndustrialDAQ.Core`**: 领域核心，定义实体模型（DeviceConfig, TagPoint, TagValue）、接口和通用契约。
-- **`IndustrialDAQ.Acquisition`**: 采集与调度引擎，负责后台数据轮询与存储队列调度。
-- **`IndustrialDAQ.Storage`**: 数据存储层，包含基于 Channel 的实时流和历史数据持久化（SQLite/时序库预留）。
-- **`Drivers.Modbus`**: Modbus 通讯驱动插件实现。
-- **`config/`**: JSON 设备配置文件存放目录。
+内置角色：
 
-## 🚀 快速启动
+- `Guest`：只读访问。
+- `Operator`：生产操作角色，可按现场资源配置权限。
+- `Engineer`：工程维护角色，默认可写入设备数据点。
+- `Admin`：账号、权限策略和系统配置管理角色。
 
-### 1. 运行模拟设备 (Python)
-为方便测试，根目录提供了一个简易的 Modbus Slave 模拟器（需要安装 Python 和 Pymodbus 库）：
-```bash
+权限策略保存后会热重载为不可变运行时快照，无需重启客户端。详细设计和测试结果见 [`docs/权限与ResourcePath动态授权说明.md`](docs/权限与ResourcePath动态授权说明.md)。
+
+## 技术栈
+
+- .NET 8 / WPF
+- Prism MVVM、DI、EventAggregator、DialogService
+- Entity Framework Core / SQLite
+- LiveChartsCore.SkiaSharpView.WPF
+- Serilog
+- NModbus、OPC UA、S7
+- Python / Pymodbus 模拟设备
+
+## 项目结构
+
+```text
+src/
+├── IndustrialDAQ.UI              WPF 客户端、页面、对话框和应用服务
+├── IndustrialDAQ.Core            领域模型、资源树、动态授权契约
+├── IndustrialDAQ.Acquisition     采集主机、驱动调度和实时发布
+├── IndustrialDAQ.Storage         实时流和历史数据持久化
+├── IndustrialDAQ.Alarm           规则工作流、报警状态机和报警中心
+├── IndustrialDAQ.Trend           趋势数据服务
+└── IndustrialDAQ.Infrastructure  EF Core 仓储和数据库实体
+
+Plugins/
+├── Drivers.Modbus
+├── Drivers.OpcUA
+└── Drivers.S7
+
+config/                            设备配置与 Modbus 模拟脚本
+docs/                              架构和功能说明
+```
+
+## 快速启动
+
+### 环境要求
+
+- Windows 10/11
+- .NET 8 SDK
+- Visual Studio 2022、JetBrains Rider 或 PowerShell 7
+- Python 3.10+（运行 Modbus 模拟器时需要）
+
+### 启动 Modbus 模拟设备
+
+```powershell
 pip install pymodbus
 python config/python_modbus_slave.py
 ```
-*注：该模拟器默认使用 CDAB 字节序（Word: Little, Byte: Big）以完美匹配 C# 浮点数解析。*
 
-### 2. 编译并运行主程序
-使用 Visual Studio 2022 或 JetBrains Rider 打开 `IndustrialDAQ.sln`，设置 `IndustrialDAQ.UI` 为启动项并运行。
+模拟脚本与 `config/production-line.json` 配合使用，用于验证实时采集、参数写入、规则触发和报警恢复。
 
-## 🎨 主题与界面外观
-本项目设计抛弃了传统的灰色原生控件，提供了精调的 `DarkTheme.xaml` 和 `LightTheme.xaml`。内置：
-- 亚克力风格的测点状态展示
-- 动态路由切换
-- 自定义无边框沉浸式窗口
+### 编译客户端
 
-## 📜 许可证
+```powershell
+dotnet restore IndustrialDAQ.sln
+dotnet build src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj
+```
 
-MIT License.
+### 运行客户端
+
+```powershell
+dotnet run --project src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj
+```
+
+SQLite 数据库固定保存在客户端程序目录，避免因 IDE、终端或快捷方式的启动目录不同而创建多份数据库。
+
+首次初始化会创建管理员账号。部署到正式现场前，应立即修改初始密码并根据产线、设备和数据点配置最小权限策略。
+
+## 配置说明
+
+- `config/production-line.json`：产线、设备、驱动和数据点定义。
+- `config/python_modbus_slave.py`：Modbus TCP 模拟设备。
+- 数据点必须通过资源树同步后，才能被规则、趋势和动态权限统一引用。
+- 业务代码不得写死设备、数据点、菜单权限或报警判断条件。
+
+## 验证
+
+```powershell
+dotnet build src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj --no-restore
+```
+
+当前权限集成测试覆盖：父路径继承、拒绝优先、默认拒绝、审计持久化、审计查询顺序以及管理员认证。
+
+## 开发原则
+
+- 配置驱动，禁止写死现场资源。
+- 功能模块化，资源树结构化。
+- 权限动态化，规则支持热更新。
+- 服务异步化，数据事件化。
+- 关键修改和授权失败必须产生审计记录。
+
+## License
+
+MIT License
