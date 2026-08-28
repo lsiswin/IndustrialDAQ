@@ -29,6 +29,7 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
     public ObservableCollection<object> TreeRoots { get; } = new();
 
     public DelegateCommand<TagDisplayItem> WriteTagCommand { get; }
+    public bool CanModify => _authManager.CanModify;
 
     public DeviceDetailViewModel(
         RealTimeStore realTimeStore, 
@@ -48,11 +49,18 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
         _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
         
         _cts = new CancellationTokenSource();
-        WriteTagCommand = new DelegateCommand<TagDisplayItem>(OnWriteTagAsync);
+        WriteTagCommand = new DelegateCommand<TagDisplayItem>(OnWriteTagAsync, _ => CanModify);
+        _authManager.CurrentUserChanged += OnCurrentUserChanged;
         
         InitializeTree();
 
         _ = SubscribeToChangesAsync(_cts.Token);
+    }
+
+    private void OnCurrentUserChanged(object? sender, EventArgs e)
+    {
+        RaisePropertyChanged(nameof(CanModify));
+        WriteTagCommand.RaiseCanExecuteChanged();
     }
 
     private void InitializeTree()
@@ -232,7 +240,8 @@ public class DeviceDetailViewModel : BindableBase, IDestructible
 
     private async void OnWriteTagAsync(TagDisplayItem? item)
     {
-        if (item == null) return;
+        // 未登录和访客身份始终只读，不进入后续资源路径授权流程。
+        if (!CanModify || item == null) return;
         
         // 当权限快照为空（未配置任何权限策略）时，直接放行（开放模式）
         bool permissionConfigured = _authorizationService.Current.Policies.Count > 0;

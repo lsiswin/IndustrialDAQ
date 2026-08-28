@@ -9,6 +9,7 @@ using Prism.Commands;
 using Prism.Events;
 using Prism.Mvvm;
 using IndustrialDAQ.UI.Events;
+using IndustrialDAQ.UI.Services;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
@@ -23,6 +24,8 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
     private readonly IDialogService _dialogService;
     private CancellationTokenSource? _cts;
     private readonly Dictionary<string, TagDisplayItem> _itemLookup = new();
+    private readonly IAuthManager _authManager;
+    public bool CanModify => _authManager.CanModify;
 
     // ─── 设备选择 ───
 
@@ -80,18 +83,25 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
         RealTimeStore realTimeStore,
         AcquisitionHost acquisitionHost,
         IEventAggregator eventAggregator,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        IAuthManager authManager)
     {
         _realTimeStore = realTimeStore ?? throw new ArgumentNullException(nameof(realTimeStore));
         _acquisitionHost = acquisitionHost ?? throw new ArgumentNullException(nameof(acquisitionHost));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _eventAggregator = eventAggregator ?? throw new ArgumentNullException(nameof(eventAggregator));
+        _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
 
         // 订阅配置重载事件
         eventAggregator.GetEvent<ConfigurationReloadedEvent>().Subscribe(LoadDevices);
 
         NavigateBackCommand = new DelegateCommand(() => { });
-        WriteTagCommand = new DelegateCommand<TagDisplayItem>(OnWriteTag);
+        WriteTagCommand = new DelegateCommand<TagDisplayItem>(OnWriteTag, _ => CanModify);
+        _authManager.CurrentUserChanged += (_, _) =>
+        {
+            RaisePropertyChanged(nameof(CanModify));
+            WriteTagCommand.RaiseCanExecuteChanged();
+        };
 
         // 延迟加载设备列表（等待 AcquisitionHost 初始化完成）
         _cts = new CancellationTokenSource();
@@ -158,7 +168,8 @@ public class ProductionMonitorViewModel : BindableBase, IDestructible
 
     private void OnWriteTag(TagDisplayItem? item)
     {
-        if (item == null || _selectedDevice == null) return;
+        // 命令层再次校验，避免仅依赖按钮隐藏造成越权写入。
+        if (!CanModify || item == null || _selectedDevice == null) return;
 
         var targetTag = _selectedDevice.Tags.FirstOrDefault(t => t.Id == item.TagId);
         if (targetTag == null) return;

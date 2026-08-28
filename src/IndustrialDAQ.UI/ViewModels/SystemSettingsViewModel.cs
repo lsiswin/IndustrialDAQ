@@ -5,6 +5,7 @@ using Prism.Commands;
 using Prism.Mvvm;
 using System.Windows;
 using System.Linq;
+using IndustrialDAQ.UI.Services;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
@@ -13,6 +14,11 @@ namespace IndustrialDAQ.UI.ViewModels;
 /// </summary>
 public class SystemSettingsViewModel : BindableBase
 {
+    private readonly IAuthManager _authManager;
+    public bool CanModify => _authManager.CanModify;
+    /// <summary>报警规则子页面 ViewModel，显式绑定以避免继承系统设置的 DataContext。</summary>
+    public AlarmRuleConfigViewModel AlarmRuleConfig { get; }
+
     /// <summary>设置分类集合。</summary>
     public ObservableCollection<SettingsCategory> Categories { get; } = new();
 
@@ -64,10 +70,18 @@ public class SystemSettingsViewModel : BindableBase
         }
     }
 
-    public SystemSettingsViewModel()
+    public SystemSettingsViewModel(AlarmRuleConfigViewModel alarmRuleConfig, IAuthManager authManager)
     {
-        SaveCommand = new DelegateCommand(OnSave);
-        ResetCommand = new DelegateCommand(OnReset);
+        AlarmRuleConfig = alarmRuleConfig;
+        _authManager = authManager;
+        SaveCommand = new DelegateCommand(OnSave, () => CanModify);
+        ResetCommand = new DelegateCommand(OnReset, () => CanModify);
+        _authManager.CurrentUserChanged += (_, _) =>
+        {
+            RaisePropertyChanged(nameof(CanModify));
+            SaveCommand.RaiseCanExecuteChanged();
+            ResetCommand.RaiseCanExecuteChanged();
+        };
 
         // 初始化设置分类
         Categories.Add(new SettingsCategory("设备管理", "管理采集设备和驱动配置", "⚙"));

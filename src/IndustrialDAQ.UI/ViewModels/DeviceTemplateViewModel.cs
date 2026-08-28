@@ -7,6 +7,7 @@ using IndustrialDAQ.Alarm;
 using IndustrialDAQ.Core.Models;
 using IndustrialDAQ.Storage;
 using IndustrialDAQ.UI.Events;
+using IndustrialDAQ.UI.Services;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
@@ -22,6 +23,8 @@ public class DeviceTemplateViewModel : BindableBase
     private readonly IDialogService _dialogService;
     private readonly DeviceTemplateRepository _templateRepository;
     private readonly AcquisitionHost _acquisitionHost;
+    private readonly IAuthManager _authManager;
+    public bool CanModify => _authManager.CanModify;
 
     // ─── 左侧模板列表 ───
 
@@ -153,13 +156,14 @@ public class DeviceTemplateViewModel : BindableBase
 
     public DeviceTemplateViewModel(AlarmManager alarmManager, IEventAggregator eventAggregator,
         IDialogService dialogService, DeviceTemplateRepository templateRepository,
-        AcquisitionHost acquisitionHost)
+        AcquisitionHost acquisitionHost, IAuthManager authManager)
     {
         _alarmManager = alarmManager;
         _eventAggregator = eventAggregator;
         _dialogService = dialogService;
         _templateRepository = templateRepository;
         _acquisitionHost = acquisitionHost;
+        _authManager = authManager;
 
         SelectTemplateCommand = new DelegateCommand<DeviceTemplateItem>(item =>
         {
@@ -169,10 +173,16 @@ public class DeviceTemplateViewModel : BindableBase
         {
             if (item is not null) SelectedDataPoint = item;
         });
-        CreateDeviceCommand = new DelegateCommand(OnCreateDevice, () => SelectedTemplate is not null)
+        CreateDeviceCommand = new DelegateCommand(OnCreateDevice, () => CanModify && SelectedTemplate is not null)
             .ObservesProperty(() => SelectedTemplate);
-        AddTemplateCommand = new DelegateCommand(OnAddTemplate);
+        AddTemplateCommand = new DelegateCommand(OnAddTemplate, () => CanModify);
         RefreshCommand = new DelegateCommand(async () => await LoadTemplatesAsync());
+        _authManager.CurrentUserChanged += (_, _) =>
+        {
+            RaisePropertyChanged(nameof(CanModify));
+            CreateDeviceCommand.RaiseCanExecuteChanged();
+            AddTemplateCommand.RaiseCanExecuteChanged();
+        };
 
         _ = LoadTemplatesAsync();
     }

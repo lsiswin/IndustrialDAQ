@@ -111,11 +111,11 @@
                     </StackPanel>
  
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button Content="生成设备配置" Command="{Binding CreateDeviceCommand}"
+                        <Button Content="生成设备配置" Command="{Binding CreateDeviceCommand}" Visibility="{Binding CanModify, Converter={StaticResource BooleanToVisibilityConverter}}"
                                 Padding="10,5" Margin="0,0,8,0" Cursor="Hand"
                                 Background="{DynamicResource BrushSuccessBg}" Foreground="{DynamicResource TextPrimaryBrush}"
                                 BorderThickness="0" FontSize="12"/>
-                        <Button Content="新增设备模板" Command="{Binding AddTemplateCommand}"
+                        <Button Content="新增设备模板" Command="{Binding AddTemplateCommand}" Visibility="{Binding CanModify, Converter={StaticResource BooleanToVisibilityConverter}}"
                                 Padding="10,5" Margin="0,0,8,0" Cursor="Hand"
                                 Background="{DynamicResource BrushSuccessBg}" Foreground="{DynamicResource TextPrimaryBrush}"
                                 BorderThickness="0" FontSize="12"/>

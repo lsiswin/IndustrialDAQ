@@ -1,8 +1,11 @@
 // File: TrendViewModel.cs  Module: UI (ViewModels)  Author: IndustrialDAQ Team
 using System.Collections.ObjectModel;
 using System.Windows;
+using System.Windows.Threading;
+using IndustrialDAQ.Acquisition;
 using IndustrialDAQ.Alarm;
 using IndustrialDAQ.Core.Models;
+using IndustrialDAQ.Core.ResourceTree;
 using IndustrialDAQ.Infrastructure;
 using IndustrialDAQ.Trend;
 using IndustrialDAQ.UI.Models;
@@ -27,6 +30,9 @@ public class TrendViewModel : BindableBase, IDestructible
     private readonly TrendEngine _trendEngine;
     private readonly AlarmManager _alarmManager;
     private readonly IDbContextFactory<DaqDbContext> _dbFactory;
+    private readonly IResourceTreeService _resourceTreeService;
+    private readonly AcquisitionHost _acquisitionHost;
+    private readonly DispatcherTimer _connectionTimer;
 
     // 颜色池
     private static readonly string[] Colors =
@@ -54,8 +60,45 @@ public class TrendViewModel : BindableBase, IDestructible
     /// <summary>可选 Tag 列表。</summary>
     public ObservableCollection<TrendTagItem> AvailableTags { get; } = [];
 
+    /// <summary>当前已显示曲线的数据点，用于右侧常驻图例。</summary>
+    public ObservableCollection<TrendTagItem> SelectedTags { get; } = [];
+
+    /// <summary>按资源路径分组后的设备列表。</summary>
+    public ObservableCollection<TrendDeviceItem> AvailableDevices { get; } = [];
+
+    private TrendDeviceItem? _selectedDevice;
+    /// <summary>复合多选框当前浏览的设备。</summary>
+    public TrendDeviceItem? SelectedDevice
+    {
+        get => _selectedDevice;
+        set
+        {
+            if (SetProperty(ref _selectedDevice, value))
+            {
+                RaisePropertyChanged(nameof(SelectedTagSummary));
+                UpdateConnectionWarning();
+            }
+        }
+    }
+
+    private string _connectionWarningText = string.Empty;
+    /// <summary>当前选择涉及的离线设备提醒。</summary>
+    public string ConnectionWarningText
+    {
+        get => _connectionWarningText;
+        set
+        {
+            if (SetProperty(ref _connectionWarningText, value))
+                RaisePropertyChanged(nameof(HasConnectionWarning));
+        }
+    }
+
+    /// <summary>是否需要显示设备离线提醒。</summary>
+    public bool HasConnectionWarning => !string.IsNullOrWhiteSpace(ConnectionWarningText);
+
     /// <summary>当前已选择的趋势点位数量。</summary>
-    public string SelectedTagSummary => $"选择数据点 ({AvailableTags.Count(t => t.IsSelected)}/{AvailableTags.Count})";
+    public string SelectedTagSummary =>
+        $"选择数据点 ({AvailableTags.Count(t => t.IsSelected)}/{AvailableTags.Count})";
 
     // ─── 控制 ───
 
@@ -121,16 +164,21 @@ public class TrendViewModel : BindableBase, IDestructible
 
     // 内部 Series 映射
     private readonly Dictionary<string, LineSeries<ObservablePoint>> _seriesMap = [];
+    private readonly Dictionary<string, ISeries> _alarmMarkerSeriesMap = [];
     private int _defaultSelectionCount;
 
     public TrendViewModel(
         TrendEngine trendEngine,
         AlarmManager alarmManager,
-        IDbContextFactory<DaqDbContext> dbFactory)
+        IDbContextFactory<DaqDbContext> dbFactory,
+        IResourceTreeService resourceTreeService,
+        AcquisitionHost acquisitionHost)
     {
         _trendEngine = trendEngine;
         _alarmManager = alarmManager;
         _dbFactory = dbFactory;
+        _resourceTreeService = resourceTreeService;
+        _acquisitionHost = acquisitionHost;
 
         // 配置 X 轴（时间轴）
         var typeface = SKTypeface.FromFamilyName("Microsoft YaHei",
@@ -213,6 +261,9 @@ public class TrendViewModel : BindableBase, IDestructible
                 HistoryEnd = DateTime.Now;
                 HistoryStart = HistoryEnd.AddHours(-1);
             }
+
+            UpdateConnectionWarning();
+            RefreshAlarmAnnotations();
         });
 
         ToggleTagCommand = new DelegateCommand<TrendTagItem>(item =>
@@ -221,6 +272,7 @@ public class TrendViewModel : BindableBase, IDestructible
             // CheckBox 已通过 TwoWay 绑定更新状态，这里只同步曲线可见性，避免状态被反转两次。
             UpdateSeriesVisibility(item);
             RaisePropertyChanged(nameof(SelectedTagSummary));
+            UpdateConnectionWarning();
         });
 
         QueryHistoryCommand = new DelegateCommand(async () => await QueryHistoryAsync());
@@ -254,6 +306,12 @@ public class TrendViewModel : BindableBase, IDestructible
         _trendEngine.DataRefreshed += OnDataRefreshed;
         _trendEngine.TagsChanged += OnTagsChanged;
         _alarmManager.AlarmTriggered += OnAlarmTriggered;
+        _alarmManager.ActiveAlarmsChanged += OnActiveAlarmsChanged;
+
+        // 即使设备掉线后不再产生采集事件，也要定时刷新连接提醒。
+        _connectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _connectionTimer.Tick += OnConnectionTimerTick;
+        _connectionTimer.Start();
 
         // 加载可用 Tag
         LoadAvailableTags();
@@ -265,6 +323,9 @@ public class TrendViewModel : BindableBase, IDestructible
         _trendEngine.DataRefreshed -= OnDataRefreshed;
         _trendEngine.TagsChanged -= OnTagsChanged;
         _alarmManager.AlarmTriggered -= OnAlarmTriggered;
+        _alarmManager.ActiveAlarmsChanged -= OnActiveAlarmsChanged;
+        _connectionTimer.Stop();
+        _connectionTimer.Tick -= OnConnectionTimerTick;
     }
 
     /// <summary>
@@ -272,42 +333,7 @@ public class TrendViewModel : BindableBase, IDestructible
     /// </summary>
     private void LoadAvailableTags()
     {
-        int colorIdx = 0;
-        foreach (var tagId in _trendEngine.DataStore.TrackedTagIds)
-        {
-            var template = _trendEngine.DataStore.GetTemplate(tagId);
-            string color = template?.LineColor ?? Colors[colorIdx % Colors.Length];
-            string name = template?.Name ?? tagId.Replace("tag-", "").Replace("-", ".");
-            colorIdx++;
-
-            AvailableTags.Add(new TrendTagItem
-            {
-                TagId = tagId,
-                TagName = name,
-                Unit = template?.Unit ?? "",
-                Color = color,
-                IsSelected = _defaultSelectionCount++ < 2
-            });
-            RaisePropertyChanged(nameof(SelectedTagSummary));
-
-            // 创建 Series
-            var series = new LineSeries<ObservablePoint>
-            {
-                Name = name,
-                Values = new ObservableCollection<ObservablePoint>(),
-                GeometrySize = template?.ShowGeometry == true ? 6 : 0,
-                Stroke = new SolidColorPaint(SKColor.Parse(color))
-                {
-                    StrokeThickness = (float)(template?.StrokeThickness ?? 2)
-                },
-                Fill = null,
-                LineSmoothness = 0
-            };
-
-            _seriesMap[tagId] = series;
-            if (AvailableTags[^1].IsSelected)
-                Series.Add(series);
-        }
+        SyncAvailableTags();
 
         // 加载报警线
         LoadAlarmLines();
@@ -358,44 +384,207 @@ public class TrendViewModel : BindableBase, IDestructible
 
     private void SyncAvailableTags()
     {
+        var trackedTagIds = _trendEngine.DataStore.TrackedTagIds
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var snapshot = _resourceTreeService.Current;
+        var deviceById = snapshot.Nodes
+            .Where(node => node.IsEnabled && node.ResourceType == ResourceType.Device)
+            .ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+
         int colorIdx = AvailableTags.Count;
-        foreach (var tagId in _trendEngine.DataStore.TrackedTagIds)
+        var usedColors = AvailableTags
+            .Select(item => item.Color)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var tagNode in snapshot.Nodes
+                     .Where(node => node.IsEnabled && node.ResourceType == ResourceType.Tag)
+                     .OrderBy(node => node.SortOrder))
         {
+            if (!TryReadTagMetadata(tagNode.MetadataJson, out var tagId, out var dataType)) continue;
+            if (!trackedTagIds.Contains(tagId) || !IsNumericDataType(dataType)) continue;
             if (AvailableTags.Any(item => item.TagId == tagId)) continue;
+            if (tagNode.ParentId is null || !deviceById.TryGetValue(tagNode.ParentId, out var deviceNode)) continue;
 
             var template = _trendEngine.DataStore.GetTemplate(tagId);
             string color = template?.LineColor ?? Colors[colorIdx++ % Colors.Length];
-            string name = template?.Name ?? tagId.Replace("tag-", "").Replace("-", ".");
-            AvailableTags.Add(new TrendTagItem
+            // 模板可能沿用相同默认色；趋势页自动换成未使用颜色，保证曲线和常驻图例易于区分。
+            if (!usedColors.Add(color))
             {
+                color = Colors.FirstOrDefault(candidate => usedColors.Add(candidate))
+                        ?? Colors[colorIdx++ % Colors.Length];
+            }
+            string name = template?.Name ?? tagNode.DisplayName;
+            var tagItem = new TrendTagItem
+            {
+                DeviceId = deviceNode.Id,
+                DeviceName = deviceNode.DisplayName,
+                ResourcePath = tagNode.Path.Value,
                 TagId = tagId,
                 TagName = name,
                 Unit = template?.Unit ?? string.Empty,
                 Color = color,
-                IsSelected = _defaultSelectionCount++ < 2
-            });
-            RaisePropertyChanged(nameof(SelectedTagSummary));
+                IsSelected = false
+            };
+            AvailableTags.Add(tagItem);
 
+            var deviceItem = AvailableDevices.FirstOrDefault(item => item.DeviceId == deviceNode.Id);
+            if (deviceItem is null)
+            {
+                deviceItem = new TrendDeviceItem
+                {
+                    DeviceId = deviceNode.Id,
+                    DeviceName = deviceNode.DisplayName,
+                    ResourcePath = deviceNode.Path.Value
+                };
+                AvailableDevices.Add(deviceItem);
+            }
+            deviceItem.Tags.Add(tagItem);
+
+            var strokePaint = new SolidColorPaint(SKColor.Parse(color))
+            {
+                StrokeThickness = (float)(template?.StrokeThickness ?? 2)
+            };
             var series = new LineSeries<ObservablePoint>
             {
                 Name = name,
                 Values = new ObservableCollection<ObservablePoint>(),
-                GeometrySize = template?.ShowGeometry == true ? 6 : 0,
-                Stroke = new SolidColorPaint(SKColor.Parse(color))
-                {
-                    StrokeThickness = (float)(template?.StrokeThickness ?? 2)
-                },
+                // 使用透明几何点扩大命中区域，使实时和历史模式的普通数据点都能触发 Tooltip。
+                GeometrySize = template?.ShowGeometry == true ? 6 : 8,
+                Stroke = strokePaint,
+                GeometryStroke = template?.ShowGeometry == true
+                    ? new SolidColorPaint(SKColor.Parse(color)) { StrokeThickness = 2 }
+                    : new SolidColorPaint(SKColors.Transparent),
+                GeometryFill = template?.ShowGeometry == true
+                    ? new SolidColorPaint(SKColor.Parse(color))
+                    : new SolidColorPaint(SKColors.Transparent),
                 Fill = null,
-                LineSmoothness = 0
+                LineSmoothness = 0,
+                YToolTipLabelFormatter = point => FormatPointTooltip(
+                    name,
+                    deviceNode.DisplayName,
+                    template?.Unit ?? string.Empty,
+                    point.Coordinate.SecondaryValue,
+                    point.Coordinate.PrimaryValue)
             };
             _seriesMap[tagId] = series;
-            if (AvailableTags[^1].IsSelected)
-                Series.Add(series);
         }
+
+        ApplyDefaultSelection();
+
+        // 默认定位到包含已选点位的设备，便于进入页面后立即看到当前选择。
+        SelectedDevice ??= AvailableDevices.FirstOrDefault(device => device.Tags.Any(tag => tag.IsSelected))
+                           ?? AvailableDevices.FirstOrDefault();
+        RaisePropertyChanged(nameof(SelectedTagSummary));
+        UpdateConnectionWarning();
+        RefreshAlarmAnnotations();
 
         // 点位首次出现后立即刷新一次，避免等待下一轮 UI 事件造成空图。
         if (AvailableTags.Count > 0 && IsRealTimeMode && !IsPaused)
             RefreshRealTimeData();
+    }
+
+    /// <summary>读取资源节点元数据中的 TagId 与数据类型。</summary>
+    private static bool TryReadTagMetadata(string? metadataJson, out string tagId, out TagDataType dataType)
+    {
+        tagId = string.Empty;
+        dataType = default;
+        if (string.IsNullOrWhiteSpace(metadataJson)) return false;
+
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(metadataJson);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("tagId", out var tagIdElement) ||
+                !root.TryGetProperty("dataType", out var dataTypeElement))
+                return false;
+
+            tagId = tagIdElement.GetString() ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(tagId) &&
+                   Enum.TryParse(dataTypeElement.GetString(), true, out dataType);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>趋势图只接受可转换为连续数值的 Tag，显式排除 Bool 与 String。</summary>
+    private static bool IsNumericDataType(TagDataType dataType) =>
+        dataType is TagDataType.Int16 or TagDataType.Int32 or TagDataType.Int64 or
+            TagDataType.UInt16 or TagDataType.UInt32 or TagDataType.Float32 or TagDataType.Float64;
+
+    /// <summary>统一格式化普通趋势点 Tooltip，避免直接显示 DateTime Ticks 的科学计数法。</summary>
+    private static string FormatPointTooltip(
+        string tagName,
+        string deviceName,
+        string unit,
+        double timestampTicks,
+        double value)
+    {
+        var ticks = (long)timestampTicks;
+        var timeText = ticks >= DateTime.MinValue.Ticks && ticks <= DateTime.MaxValue.Ticks
+            ? new DateTime(ticks, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            : "未知时间";
+        var unitSuffix = string.IsNullOrWhiteSpace(unit) ? string.Empty : $" {unit}";
+        return $"{tagName}\n设备：{deviceName}\n时间：{timeText}\n数值：{value:F2}{unitSuffix}";
+    }
+
+    /// <summary>
+    /// 默认显示实际液位和实际速度，优先选择已连接设备；设定值 SetLevel/SetSpeed 不再默认显示。
+    /// </summary>
+    private void ApplyDefaultSelection()
+    {
+        if (_defaultSelectionCount > 0 || AvailableTags.Any(tag => tag.IsSelected)) return;
+
+        var preferredNames = new[] { "Filling.ActualLevel", "Conveyor.ActualSpeed" };
+        var defaults = preferredNames
+            .Select(name => AvailableTags
+                .Where(tag => string.Equals(tag.TagName, name, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(tag => _acquisitionHost.IsDeviceConnected(tag.DeviceId))
+                .FirstOrDefault())
+            .Where(tag => tag is not null)
+            .Cast<TrendTagItem>()
+            .DistinctBy(tag => tag.TagId)
+            .Take(2)
+            .ToList();
+
+        foreach (var tag in defaults)
+        {
+            tag.IsSelected = true;
+            if (_seriesMap.TryGetValue(tag.TagId, out var series)) Series.Add(series);
+            SelectedTags.Add(tag);
+        }
+
+        _defaultSelectionCount = defaults.Count;
+    }
+
+    private void OnConnectionTimerTick(object? sender, EventArgs e) => UpdateConnectionWarning();
+
+    /// <summary>
+    /// 检查当前浏览设备以及所有已选曲线所属设备，任一掉线都会给出明确提醒。
+    /// 历史模式读取数据库，不阻止查询，但仍提示当前设备实时连接状态。
+    /// </summary>
+    private void UpdateConnectionWarning()
+    {
+        var involvedDevices = AvailableTags
+            .Where(tag => tag.IsSelected)
+            .Select(tag => new { tag.DeviceId, tag.DeviceName })
+            .ToList();
+
+        if (SelectedDevice is not null &&
+            involvedDevices.All(device => !string.Equals(device.DeviceId, SelectedDevice.DeviceId, StringComparison.OrdinalIgnoreCase)))
+        {
+            involvedDevices.Add(new { SelectedDevice.DeviceId, SelectedDevice.DeviceName });
+        }
+
+        var disconnectedNames = involvedDevices
+            .Where(device => !_acquisitionHost.IsDeviceConnected(device.DeviceId))
+            .Select(device => device.DeviceName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        ConnectionWarningText = disconnectedNames.Count == 0
+            ? string.Empty
+            : $"设备未连接或已掉线：{string.Join("、", disconnectedNames)}。实时曲线可能停止更新，历史数据仍可查询。";
     }
 
     /// <summary>
@@ -444,6 +633,8 @@ public class TrendViewModel : BindableBase, IDestructible
 
         TotalPoints = totalPts;
         UpdateStats(globalMin, globalMax, globalSum, globalCount);
+        // 报警持续期间每次刷新都补充最新红色采样点，而不是只保留触发瞬间。
+        RefreshAlarmAnnotations();
 
         if (globalCount > 0 && globalMax > globalMin)
         {
@@ -583,6 +774,68 @@ public class TrendViewModel : BindableBase, IDestructible
         });
     }
 
+    private void OnActiveAlarmsChanged(object? sender, EventArgs e) =>
+        Application.Current?.Dispatcher.Invoke(RefreshAlarmAnnotations);
+
+    /// <summary>
+    /// 将活跃报警映射为独立的红色散点覆盖层。
+    /// 基础趋势线保持原色，报警描述只写入红色散点的 Series.Name，
+    /// 因此只有鼠标悬浮到报警点时才会显示报警原因。
+    /// </summary>
+    private void RefreshAlarmAnnotations()
+    {
+        var alarmsByTag = _alarmManager.GetActiveAlarms()
+            .Where(alarm => !string.IsNullOrWhiteSpace(alarm.TagId))
+            .GroupBy(alarm => alarm.TagId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tag in AvailableTags)
+        {
+            // 先移除旧覆盖层，避免报警更新后残留重复红点。
+            if (_alarmMarkerSeriesMap.Remove(tag.TagId, out var oldMarkerSeries))
+                Series.Remove(oldMarkerSeries);
+
+            tag.IsAlarmActive = alarmsByTag.TryGetValue(tag.TagId, out var alarms);
+            var activeAlarms = alarms ?? [];
+            tag.AlarmDescription = tag.IsAlarmActive
+                ? string.Join("；", activeAlarms.Select(alarm => $"{alarm.Title}：{alarm.Message}"))
+                : string.Empty;
+
+            if (!tag.IsAlarmActive || !tag.IsSelected || !IsRealTimeMode) continue;
+
+            var alarmStartTicks = activeAlarms.Min(alarm => alarm.OccurredAt.ToUniversalTime().Ticks);
+            var alarmPoints = _seriesMap.TryGetValue(tag.TagId, out var baseSeries) &&
+                              baseSeries.Values is ObservableCollection<ObservablePoint> baseValues
+                ? baseValues
+                    .Where(point => point.X is not null && point.X.Value >= alarmStartTicks)
+                    .Select(point => new ObservablePoint(point.X, point.Y))
+                    .ToList()
+                : [];
+
+            // 触发事件可能早于缓存刷新，至少保留报警触发点供用户立即查看。
+            if (alarmPoints.Count == 0)
+            {
+                alarmPoints.AddRange(activeAlarms.Select(alarm =>
+                    new ObservablePoint(alarm.OccurredAt.ToUniversalTime().Ticks, alarm.TriggerValue)));
+            }
+            var alarmDescription = string.Join("；", activeAlarms.Select(alarm => $"{alarm.Title}：{alarm.Message}"));
+            var alarmPaint = new SolidColorPaint(SKColor.Parse("#EF4444"));
+            var markerSeries = new ScatterSeries<ObservablePoint>
+            {
+                Name = $"{tag.TagName} 报警",
+                Values = new ObservableCollection<ObservablePoint>(alarmPoints),
+                GeometrySize = 13,
+                Fill = alarmPaint,
+                Stroke = new SolidColorPaint(SKColor.Parse("#EF4444")) { StrokeThickness = 2 },
+                YToolTipLabelFormatter = point =>
+                    $"{FormatPointTooltip(tag.TagName, tag.DeviceName, tag.Unit, point.Coordinate.SecondaryValue, point.Coordinate.PrimaryValue)}\n报警：{alarmDescription}"
+            };
+
+            _alarmMarkerSeriesMap[tag.TagId] = markerSeries;
+            Series.Add(markerSeries);
+        }
+    }
+
     /// <summary>
     /// 更新 Series 可见性。
     /// </summary>
@@ -594,11 +847,17 @@ public class TrendViewModel : BindableBase, IDestructible
             {
                 if (!Series.Contains(series))
                     Series.Add(series);
+                if (!SelectedTags.Contains(item))
+                    SelectedTags.Add(item);
+                RefreshAlarmAnnotations();
             }
             else
             {
                 // 直接移除曲线，避免 LiveCharts 仅更新 IsVisible 后仍保留旧线条。
                 Series.Remove(series);
+                SelectedTags.Remove(item);
+                if (_alarmMarkerSeriesMap.Remove(item.TagId, out var alarmMarkerSeries))
+                    Series.Remove(alarmMarkerSeries);
                 if (series.Values is ObservableCollection<ObservablePoint> values)
                     values.Clear();
             }

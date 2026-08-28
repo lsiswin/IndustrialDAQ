@@ -185,7 +185,8 @@
                         <!-- ═══ 报警规则（仅"报警规则"分类显示 — 嵌入 AlarmRuleConfigView）═══ -->
                         <Border Style="{StaticResource CardBorderStyle}"
                                 Visibility="{Binding SelectedCategory.Name, Converter={StaticResource CategoryToVis}, ConverterParameter=报警规则}">
-                            <views:AlarmRuleConfigView/>
+                            <!-- 显式绑定报警规则 ViewModel，防止嵌套视图误用系统设置命令。 -->
+                            <views:AlarmRuleConfigView DataContext="{Binding AlarmRuleConfig}"/>
                         </Border>
 
                         <!-- ═══ 日志设置（仅"日志设置"分类显示）═══ -->
@@ -219,7 +220,7 @@
                                    Foreground="{StaticResource TextMutedBrush}"/>
 
                         <Button Grid.Column="1" Content="↺ 重置"
-                                Command="{Binding ResetCommand}"
+                                Command="{Binding ResetCommand}" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"
                                 Width="80" Height="30" Margin="0,0,8,0"
                                 Background="{StaticResource BrushBgTertiary}"
                                 Foreground="{StaticResource TextSecondaryBrush}"
@@ -233,7 +234,7 @@
                         </Button>
 
                         <Button Grid.Column="2" Content="💾 保存"
-                                Command="{Binding SaveCommand}"
+                                Command="{Binding SaveCommand}" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"
                                 Width="80" Height="30"
                                 Background="{StaticResource SuccessBrush}"
                                 Foreground="{StaticResource TextPrimaryBrush}"

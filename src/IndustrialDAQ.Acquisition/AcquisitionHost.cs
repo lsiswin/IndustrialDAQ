@@ -170,6 +170,13 @@ public sealed class AcquisitionHost : IHostedService
     }
 
     /// <summary>
+    /// 获取设备当前连接状态。设备未启动或驱动已断开时均返回 false。
+    /// UI 只读取运行时状态，不直接依赖具体协议驱动实现。
+    /// </summary>
+    public bool IsDeviceConnected(string deviceId) =>
+        _devices.TryGetValue(deviceId, out DeviceRunState? state) && state.Driver.IsConnected;
+
+    /// <summary>
     /// 获取所有已启动设备的配置列表。
     /// </summary>
     public IReadOnlyList<DeviceConfig> GetDevices() =>

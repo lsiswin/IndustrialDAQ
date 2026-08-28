@@ -101,13 +101,14 @@ public partial class App : PrismApplication
         containerRegistry.RegisterForNavigation<TrendView>();
         containerRegistry.RegisterForNavigation<DeviceTemplateView>();
         containerRegistry.RegisterForNavigation<SystemSettingsView>();
-        containerRegistry.RegisterForNavigation<AlarmRuleConfigView, AlarmRuleConfigViewModel>();
+        // 报警规则只通过“系统设置/报警规则”进入，避免出现多个配置入口。
 
         containerRegistry.RegisterDialogWindow<FramelessDialogWindow>();
         containerRegistry.RegisterDialog<WriteTagDialog, WriteTagDialogViewModel>();
         containerRegistry.RegisterDialog<CreateDeviceDialog, CreateDeviceDialogViewModel>();
         containerRegistry.RegisterDialog<AddDeviceTemplateDialog, AddDeviceTemplateDialogViewModel>();
         containerRegistry.RegisterDialog<LoginDialog, LoginDialogViewModel>();
+        containerRegistry.RegisterDialog<RegisterDialog, RegisterDialogViewModel>();
     }
 
     protected override IContainerExtension CreateContainerExtension()

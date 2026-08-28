@@ -217,6 +217,53 @@ public sealed class AlarmHistoryRepository
     }
 
     /// <summary>
+    /// 关闭上次 Runtime 异常退出后遗留的活跃报警。
+    /// 新进程启动后规则引擎会依据当前实时值重新生成新的报警周期，
+    /// 因此旧进程中的 Active/Acknowledged 记录不能继续占用活跃状态。
+    /// </summary>
+    public async Task<int> ReconcileOrphanedActiveAlarmsAsync(
+        DateTime runtimeStartedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            var activeStatuses = new[]
+            {
+                AlarmStatus.Active.ToString(),
+                AlarmStatus.Acknowledged.ToString()
+            };
+
+            var orphanedRecords = await context.AlarmHistories
+                .Where(entity => activeStatuses.Contains(entity.Status)
+                    && entity.OccurredAt < runtimeStartedAtUtc)
+                .ToListAsync(cancellationToken);
+
+            foreach (var entity in orphanedRecords)
+            {
+                entity.Status = AlarmStatus.Cleared.ToString();
+                entity.ClearedAt = runtimeStartedAtUtc;
+            }
+
+            if (orphanedRecords.Count > 0)
+            {
+                await context.SaveChangesAsync(cancellationToken);
+                _logger.LogWarning(
+                    "Runtime 启动对账已关闭 {Count} 条遗留活跃报警，关闭时间: {RuntimeStartedAtUtc}",
+                    orphanedRecords.Count,
+                    runtimeStartedAtUtc);
+            }
+
+            return orphanedRecords.Count;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Runtime 启动时对账遗留活跃报警失败");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// 获取报警统计信息。
     /// </summary>
     /// <param name="startTime">开始时间。</param>

@@ -5,6 +5,7 @@ namespace IndustrialDAQ.UI.ViewModels;
 public class LoginDialogViewModel : BindableBase, IDialogAware
 {
     private readonly IAuthManager _authManager;
+    private readonly IDialogService _dialogService;
 
     private string _username = "";
     public string Username
@@ -38,14 +39,17 @@ public class LoginDialogViewModel : BindableBase, IDialogAware
     public DialogCloseListener RequestClose { get; }
 
     public DelegateCommand LoginCommand { get; }
+    public DelegateCommand ShowRegisterCommand { get; }
     public DelegateCommand CancelCommand { get; }
 
-    public LoginDialogViewModel(IAuthManager authManager)
+    public LoginDialogViewModel(IAuthManager authManager, IDialogService dialogService)
     {
         _authManager = authManager ?? throw new ArgumentNullException(nameof(authManager));
+        _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         LoginCommand = new DelegateCommand(OnLoginExecute, CanLoginExecute)
             .ObservesProperty(() => Username)
             .ObservesProperty(() => Password);
+        ShowRegisterCommand = new DelegateCommand(() => _dialogService.ShowDialog("RegisterDialog"));
         CancelCommand = new DelegateCommand(OnCancelExecute);
     }
 

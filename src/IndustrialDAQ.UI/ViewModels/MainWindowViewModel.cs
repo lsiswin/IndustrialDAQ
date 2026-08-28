@@ -84,7 +84,6 @@ public class MainWindowViewModel : BindableBase
                 "Trend" => "TrendView",
                 "DeviceTemplate" => "DeviceTemplateView",
                 "SystemSettings" => "SystemSettingsView",
-                "AlarmRuleConfig" => "AlarmRuleConfigView",
                 _ => page
             };
 
@@ -97,7 +96,6 @@ public class MainWindowViewModel : BindableBase
                 "Trend" => "趋势监控",
                 "DeviceTemplate" => "设备模板",
                 "SystemSettings" => "系统设置",
-                "AlarmRuleConfig" => "报警规则配置",
                 _ => page
             };
 
@@ -128,6 +126,9 @@ public class MainWindowViewModel : BindableBase
 
         // 订阅全局通知事件
         _eventAggregator.GetEvent<NotificationEvent>().Subscribe(OnNotificationReceived);
+
+        // 页面内部导航统一回到 Shell 命令，避免内容已切换但菜单和标题仍停留在旧页面。
+        _eventAggregator.GetEvent<NavigationRequestEvent>().Subscribe(page => NavigateCommand.Execute(page));
 
         // 订阅报警事件
         _alarmManager.AlarmTriggered += OnAlarmTriggered;
@@ -163,8 +164,17 @@ public class MainWindowViewModel : BindableBase
                 Message = $"{e.Record.TagName}: {e.Record.Message}",
                 Type = notificationType,
                 DurationMs = 0,  // 报警通知不自动消失，需要手动关闭或点击
-                NavigateTo = "AlarmRecord"  // 点击跳转到报警日志
+                NavigateTo = "AlarmRecord",  // 点击跳转到报警日志
+                CorrelationKey = e.Record.RuleId
             };
+
+            // 同一规则在活跃期间只保留一个弹窗，避免重复事件阻塞界面操作。
+            var existingNotification = Notifications.FirstOrDefault(item =>
+                item.CorrelationKey == notification.CorrelationKey);
+            if (existingNotification is not null)
+            {
+                Notifications.Remove(existingNotification);
+            }
 
             Notifications.Add(notification);
 
@@ -191,6 +201,15 @@ public class MainWindowViewModel : BindableBase
         System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
             ActiveAlarmCount = _alarmManager.GetActiveAlarms().Count;
+
+            // 报警恢复后关闭对应规则的弹窗；完整触发记录仍保留在报警日志中。
+            var notificationsToRemove = Notifications
+                .Where(item => item.CorrelationKey == e.Record.RuleId)
+                .ToList();
+            foreach (var notification in notificationsToRemove)
+            {
+                Notifications.Remove(notification);
+            }
         });
     }
 

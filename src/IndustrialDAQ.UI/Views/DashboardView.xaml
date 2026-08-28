@@ -8,7 +8,7 @@
              prism:ViewModelLocator.AutoWireViewModel="True"
              Background="{DynamicResource MainBgBrush}">
 
-    <Grid Margin="24">
+    <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -30,73 +30,78 @@
             </StackPanel>
 
             <!-- 右侧状态栏 -->
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+            <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="System Status:" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" FontSize="13"/>
                 <Ellipse Width="10" Height="10" Fill="{DynamicResource SuccessBrush}" Margin="8,0,6,0" VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding SystemStatus}" Foreground="{DynamicResource SuccessBrush}" VerticalAlignment="Center" Margin="0,0,24,0" FontSize="13"/>
 
-                <TextBlock Text="User:" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" FontSize="13" Margin="0,0,6,0"/>
-                <TextBlock Text="👤" Foreground="{DynamicResource InfoBrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <TextBlock Text="{Binding CurrentUser}" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,24,0" FontSize="13"/>
+                <Button Command="{Binding UserSessionCommand}" Background="Transparent" BorderThickness="0"
+                        Padding="4,2" Margin="0,0,20,0" Cursor="Hand" ToolTip="登录或退出当前用户">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="User:" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" FontSize="13" Margin="0,0,6,0"/>
+                        <TextBlock Text="👤" Foreground="{DynamicResource InfoBrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <TextBlock Text="{Binding CurrentUser}" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" FontSize="13"/>
+                    </StackPanel>
+                </Button>
 
                 <TextBlock Text="Time:" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" FontSize="13" Margin="0,0,6,0"/>
                 <TextBlock Text="📅" Foreground="{DynamicResource InfoBrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                 <TextBlock Text="{Binding CurrentTime}" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="0,0,24,0" FontSize="13" Width="140"/>
 
+                <Button Command="{Binding OpenAlarmLogCommand}" Background="Transparent" BorderThickness="0"
+                        Padding="0" Cursor="Hand" ToolTip="打开报警日志">
                 <Border Background="{DynamicResource DangerBgBrush}" BorderBrush="{DynamicResource DangerBorderBrush}" BorderThickness="1" CornerRadius="4" Padding="8,4">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="🔔" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <TextBlock Text="{Binding AlarmCount}" Foreground="{DynamicResource DangerBrush}" VerticalAlignment="Center" FontWeight="Bold"/>
                     </StackPanel>
                 </Border>
+                </Button>
             </StackPanel>
+            </ScrollViewer>
         </Grid>
 
         <!-- ═══ 顶部摘要卡片 ═══ -->
-        <Grid Grid.Row="1" Margin="0,0,0,24">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
+        <UniformGrid Grid.Row="1" Columns="3" Margin="0,0,0,18">
 
             <!-- 卡片 1: 总产量 -->
-            <Border Grid.Column="0" Margin="0,0,12,0" Background="{DynamicResource CardBgBrush}" 
+            <Border Margin="0,0,8,0" MinWidth="230" Background="{DynamicResource CardBgBrush}" 
                     BorderBrush="{DynamicResource InfoBrush}" BorderThickness="1" CornerRadius="6">
-                <StackPanel Orientation="Horizontal" Margin="20">
+                <StackPanel Orientation="Horizontal" Margin="14">
                     <Border Background="#1A3B82F6" CornerRadius="8" Width="48" Height="48" Margin="0,0,16,0">
                         <TextBlock Text="🏆" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <TextBlock Text="总产量：" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="18" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding TotalYield, StringFormat='{}{0:#,0}'}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="28" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Text="总产量：" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="15" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding TotalYield, StringFormat='{}{0:#,0}'}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold" VerticalAlignment="Center"/>
                     <TextBlock Text=" (瓶)" Foreground="{DynamicResource TextMutedBrush}" FontSize="16" VerticalAlignment="Center" Margin="6,0,0,0"/>
                 </StackPanel>
             </Border>
 
-            <!-- 卡片 2: 良品率 -->
-            <Border Grid.Column="1" Margin="12,0,12,0" Background="{DynamicResource CardBgBrush}" 
+            <!-- 卡片 2: Modbus 实时液位 -->
+            <Border Margin="8,0" MinWidth="230" Background="{DynamicResource CardBgBrush}" 
                     BorderBrush="{DynamicResource SuccessBrush}" BorderThickness="1" CornerRadius="6">
-                <StackPanel Orientation="Horizontal" Margin="20">
+                <StackPanel Orientation="Horizontal" Margin="14">
                     <Border Background="#1A10B981" CornerRadius="8" Width="48" Height="48" Margin="0,0,16,0">
                         <TextBlock Text="✅" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <TextBlock Text="良品率：" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="18" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding YieldRate, StringFormat='{}{0:F1}%'}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="28" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Text="实时液位：" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="15" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding CurrentLevel, StringFormat='{}{0:F1} mL'}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
 
-            <!-- 卡片 3: 能耗 -->
-            <Border Grid.Column="2" Margin="12,0,0,0" Background="{DynamicResource CardBgBrush}" 
+            <!-- 卡片 3: Modbus 传送带速度 -->
+            <Border Margin="8,0,0,0" MinWidth="230" Background="{DynamicResource CardBgBrush}" 
                     BorderBrush="{DynamicResource WarningBrush}" BorderThickness="1" CornerRadius="6">
-                <StackPanel Orientation="Horizontal" Margin="20">
+                <StackPanel Orientation="Horizontal" Margin="14">
                     <Border Background="#1AF59E0B" CornerRadius="8" Width="48" Height="48" Margin="0,0,16,0">
                         <TextBlock Text="⚡" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <TextBlock Text="能耗 (kWh)：" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="18" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding EnergyConsumption, StringFormat='{}{0:F1}'}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="28" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Text="传送带速度：" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="15" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding ConveyorSpeed, StringFormat='{}{0:F1} m/min'}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
-        </Grid>
+        </UniformGrid>
 
         <!-- ═══ 单产线生产流程 ═══ -->
         <Border Grid.Row="2" Style="{DynamicResource PanelBorderStyle}" Margin="0,0,0,16">
@@ -108,19 +113,19 @@
                 
                 <TextBlock Text="单产线生产流程" Style="{DynamicResource PanelTitleStyle}" Margin="16,16,16,8"/>
 
-                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="16,0,16,16">
+                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Margin="16,0,16,16">
                     <ItemsControl ItemsSource="{Binding Stations}" VerticalAlignment="Center">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                                <StackPanel Orientation="Horizontal" />
+                                <UniformGrid Columns="4" HorizontalAlignment="Stretch" />
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type models:StationModel}">
-                                <StackPanel Orientation="Horizontal">
+                                <Grid Margin="6">
                                     
                                     <!-- 工位卡片 -->
-                                    <Border Width="190" Height="260" Padding="16" Margin="0,8"
+                                    <Border MinWidth="120" MinHeight="180" Padding="14" Margin="4,8,14,8"
                                             Background="{DynamicResource CardBgBrush}"
                                             BorderThickness="2" CornerRadius="8">
                                         <!-- 使用绑定改变边框颜色 -->
@@ -191,7 +196,7 @@
                                     </Border>
 
                                     <!-- 连接箭头 (使用 Binding IsLast 隐藏最后一个箭头) -->
-                                    <Path Data="M0,0 L24,0 M18,-6 L24,0 L18,6" Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="2" VerticalAlignment="Center" Margin="12,0">
+                                    <Path Data="M0,0 L16,0 M11,-5 L16,0 L11,5" Stroke="{DynamicResource TextMutedBrush}" StrokeThickness="2" VerticalAlignment="Center" HorizontalAlignment="Right">
                                         <Path.Style>
                                             <Style TargetType="Path">
                                                 <Setter Property="Visibility" Value="Visible"/>
@@ -204,7 +209,7 @@
                                         </Path.Style>
                                     </Path>
 
-                                </StackPanel>
+                                </Grid>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

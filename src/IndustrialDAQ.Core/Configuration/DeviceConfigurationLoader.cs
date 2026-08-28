@@ -95,6 +95,9 @@ public static class DeviceConfigurationLoader
         public string Access { get; set; } = "Read";
         public string? Description { get; set; }
 
+        /// <summary>寄存器内位索引（0-15），用于 Bool 在 HR/IR 上的按位读写。</summary>
+        public int BitIndex { get; set; } = -1;
+
         /// <summary>
         /// 转换为领域模型 — 根据设备 DriverType 自动选择对应的协议地址。
         /// </summary>
@@ -117,7 +120,8 @@ public static class DeviceConfigurationLoader
                 ScanRateMs = ScanRateMs,
                 Deadband = Deadband,
                 Access = Enum.Parse<TagAccess>(Access, ignoreCase: true),
-                Description = Description ?? string.Empty
+                Description = Description ?? string.Empty,
+                BitIndex = BitIndex
             };
         }
     }
