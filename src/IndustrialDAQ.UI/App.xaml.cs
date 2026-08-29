@@ -143,10 +143,7 @@ public partial class App : PrismApplication
             builder.AddSerilog();
         });
 
-        // 数据库固定到程序目录，避免从 IDE、终端或快捷方式启动时生成多份相对路径数据库。
-        var databasePath = Path.Combine(AppContext.BaseDirectory, "industrialdaq.db");
-        services.AddDbContextFactory<DaqDbContext>(options =>
-            options.UseSqlite($"Data Source={databasePath}"));
+        services.AddDbContextFactory<DaqDbContext>(ConfigureDatabase);
 
         extension.Populate(services);
 
@@ -162,9 +159,12 @@ public partial class App : PrismApplication
         using (var db = dbFactory.CreateDbContext())
         {
             db.Database.EnsureCreated();
-            // 为已有数据库补建新增的表（EnsureCreated 不会为已有库添加新表）
-            EnsureTemplateTablesExist(db);
-            EnsureSecuritySchema(db);
+            if (db.Database.IsSqlite())
+            {
+                // SQLite 旧现场库没有迁移历史，需要兼容补建后续新增表。
+                EnsureTemplateTablesExist(db);
+                EnsureSecuritySchema(db);
+            }
         }
 
         // ── 初始化内置设备模板（首次运行时写入数据库）──
@@ -238,6 +238,23 @@ public partial class App : PrismApplication
         // ── 导航到仪表板 ──
         var regionManager = Container.Resolve<IRegionManager>();
         regionManager.RequestNavigate("MainRegion", nameof(DashboardView));
+    }
+
+    private static void ConfigureDatabase(DbContextOptionsBuilder options)
+    {
+        var provider = Environment.GetEnvironmentVariable("INDUSTRIALDAQ_STORAGE_PROVIDER")?.Trim();
+        if (string.Equals(provider, "PostgreSQL", StringComparison.OrdinalIgnoreCase) || string.Equals(provider, "Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            var connectionString = Environment.GetEnvironmentVariable("INDUSTRIALDAQ_POSTGRES_CONNECTION");
+            if (string.IsNullOrWhiteSpace(connectionString))
+                throw new InvalidOperationException("启用 PostgreSQL 时必须设置 INDUSTRIALDAQ_POSTGRES_CONNECTION。");
+            options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null));
+            return;
+        }
+
+        // SQLite 数据库固定到程序目录，避免不同启动目录生成多份数据库。
+        var databasePath = Path.Combine(AppContext.BaseDirectory, "industrialdaq.db");
+        options.UseSqlite($"Data Source={databasePath}");
     }
 
     private async Task LoadCalculationRulesAsync(DataProcessor processor)
