@@ -1,6 +1,7 @@
 // File: DataProcessor.cs  Module: Processing Engine  Author: IndustrialDAQ Team
 using System.Collections.Concurrent;
 using System.Data;
+using System.Globalization;
 using System.Text.RegularExpressions;
 using IndustrialDAQ.Core.Models;
 using IndustrialDAQ.Storage;
@@ -25,7 +26,7 @@ public sealed class DataProcessor : IHostedService
     private readonly ConcurrentDictionary<string, double> _currentValues = new();
 
     /// <summary>TagName -> 依赖此测点的 RuleId 集合（反向索引，加速查找）。</summary>
-    private readonly ConcurrentDictionary<string, HashSet<string>> _tagToRules = new();
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _tagToRules = new();
 
     private CancellationTokenSource? _cts;
     private Task? _consumeTask;
@@ -46,11 +47,10 @@ public sealed class DataProcessor : IHostedService
     {
         _rules[rule.RuleId] = rule;
 
-        foreach (string tagName in rule.InputTagNames)
+        foreach (var input in rule.EffectiveInputs)
         {
-            _tagToRules.AddOrUpdate(tagName,
-                _ => new HashSet<string> { rule.RuleId },
-                (_, set) => { set.Add(rule.RuleId); return set; });
+            var inputKey = string.IsNullOrWhiteSpace(input.TagId) ? input.TagName : input.TagId;
+            _tagToRules.GetOrAdd(inputKey, _ => new ConcurrentDictionary<string, byte>())[rule.RuleId] = 0;
         }
 
         _logger.LogInformation("已注册计算规则: {RuleId} [{Expression}] -> {Target}",
@@ -115,11 +115,13 @@ public sealed class DataProcessor : IHostedService
                     continue;
 
                 // 更新当前值缓存
+                _currentValues[value.TagId] = numericValue;
                 _currentValues[value.TagName] = numericValue;
 
-                // 查找依赖此测点的规则
-                if (!_tagToRules.TryGetValue(value.TagName, out HashSet<string>? dependentRules))
-                    continue;
+                // 新规则按 TagId 唯一匹配；旧规则继续兼容 TagName。
+                var dependentRules = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (_tagToRules.TryGetValue(value.TagId, out var byId)) dependentRules.UnionWith(byId.Keys);
+                if (_tagToRules.TryGetValue(value.TagName, out var byName)) dependentRules.UnionWith(byName.Keys);
 
                 foreach (string ruleId in dependentRules)
                 {
@@ -147,17 +149,18 @@ public sealed class DataProcessor : IHostedService
             string expression = rule.Expression;
             bool allInputsReady = true;
 
-            foreach (string tagName in rule.InputTagNames)
+            foreach (var input in rule.EffectiveInputs)
             {
-                if (!_currentValues.TryGetValue(tagName, out double val))
+                var inputKey = string.IsNullOrWhiteSpace(input.TagId) ? input.TagName : input.TagId;
+                if (!_currentValues.TryGetValue(inputKey, out double val))
                 {
                     allInputsReady = false;
                     break;
                 }
                 // 替换变量名（使用 word boundary 避免部分匹配）
                 expression = Regex.Replace(expression,
-                    $@"\b{Regex.Escape(tagName)}\b",
-                    val.ToString("R")); // "R" 格式保持浮点精度
+                    $@"\b{Regex.Escape(input.Alias)}\b",
+                    val.ToString("R", CultureInfo.InvariantCulture));
             }
 
             if (!allInputsReady) return;
@@ -165,7 +168,7 @@ public sealed class DataProcessor : IHostedService
             // 使用 DataTable.Compute 安全求值
             object result = new DataTable().Compute(expression, null);
 
-            double numericResult = Convert.ToDouble(result);
+            double numericResult = Convert.ToDouble(result, CultureInfo.InvariantCulture);
 
             // 如果结果为 NaN 或 Infinity，跳过
             if (double.IsNaN(numericResult) || double.IsInfinity(numericResult))
