@@ -50,6 +50,8 @@ public static class DeviceConfigurationLoader
         public int CycleTimeMs { get; set; } = 1000;
         public int TimeoutMs { get; set; } = 3000;
         public int RetryCount { get; set; } = 3;
+        public string? OpcUaUsername { get; set; }
+        public string? OpcUaPasswordEnvironmentVariable { get; set; }
         public string? Description { get; set; }
         public List<TagPointDto> Tags { get; set; } = new();
 
@@ -65,6 +67,8 @@ public static class DeviceConfigurationLoader
             CycleTimeMs = CycleTimeMs,
             TimeoutMs = TimeoutMs,
             RetryCount = RetryCount,
+            OpcUaUsername = OpcUaUsername,
+            OpcUaPasswordEnvironmentVariable = OpcUaPasswordEnvironmentVariable,
             Tags = Tags.Select(t => t.ToTagPoint(DriverType)).ToList()
         };
     }
