@@ -82,6 +82,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<SecurityAuditService>();
         containerRegistry.RegisterSingleton<PermissionManagementService>();
         containerRegistry.RegisterSingleton<RuntimeSettingsService>();
+        containerRegistry.RegisterSingleton<HistoricalDataRetentionService>();
 
         containerRegistry.RegisterSingleton<IAuthorizationRepository, AuthorizationRepository>();
         containerRegistry.RegisterSingleton<IAuthorizationService, AuthorizationService>();
@@ -216,11 +217,13 @@ public partial class App : PrismApplication
         var alarmStateMachineService = Container.Resolve<IAlarmStateMachineService>();
         var alarmCenter = Container.Resolve<IAlarmCenter>();
         var notificationDispatcher = Container.Resolve<AlarmNotificationDispatcher>();
+        var retentionService = Container.Resolve<HistoricalDataRetentionService>();
         _ = alarmManager.StartAsync(CancellationToken.None);
         _ = ruleEngineService.StartAsync(CancellationToken.None);
         _ = alarmStateMachineService.StartAsync(CancellationToken.None);
         _ = alarmCenter.StartAsync(CancellationToken.None);
         _ = notificationDispatcher.StartAsync(CancellationToken.None);
+        _ = retentionService.StartAsync(CancellationToken.None);
 
         // ── 启动趋势引擎 ──
         var trendEngine = Container.Resolve<TrendEngine>();
