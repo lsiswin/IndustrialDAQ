@@ -60,6 +60,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<HistoryWriter>();
         containerRegistry.RegisterSingleton<DataProcessor>();
         containerRegistry.RegisterSingleton<CalculationRuleRepository>();
+        containerRegistry.RegisterSingleton<CalculationResourceSynchronizer>();
         containerRegistry.RegisterSingleton<MainWindowViewModel>();
 
         // 报警系统服务（统一走新链路，AlarmManager 仅作为 UI 兼容门面）
@@ -277,7 +278,9 @@ public partial class App : PrismApplication
         try
         {
             var repository = Container.Resolve<CalculationRuleRepository>();
-            processor.ReplaceRules(await repository.LoadAsync());
+            var rules = await repository.LoadAsync();
+            processor.ReplaceRules(rules);
+            await Container.Resolve<CalculationResourceSynchronizer>().SyncAsync(rules);
         }
         catch (Exception ex)
         {

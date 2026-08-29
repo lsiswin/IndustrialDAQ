@@ -248,29 +248,75 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- 计算规则只在系统设置中维护，保存后直接热加载到数据加工引擎。 -->
+                        <!-- 计算规则四步向导：输入、运算、输出、确认。 -->
                         <Border Style="{StaticResource CardBorderStyle}"
                                 Visibility="{Binding SelectedCategory.Name, Converter={StaticResource CategoryToVis}, ConverterParameter=计算规则}">
                             <Grid DataContext="{Binding CalculationRuleManagement}">
-                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-                                    <TextBlock Text="∑ 计算规则与虚拟量" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                                    <Button Content="新增" Command="{Binding AddCommand}" Margin="16,0,6,0" Padding="12,5"/>
-                                    <Button Content="删除" Command="{Binding DeleteCommand}" Margin="0,0,6,0" Padding="12,5"/>
-                                    <Button Content="刷新" Command="{Binding RefreshCommand}" Padding="12,5"/>
-                                </StackPanel>
-                                <DataGrid Grid.Row="1" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule}" AutoGenerateColumns="False" CanUserAddRows="False" MinHeight="300">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Margin="0,0,0,12">
+                                    <TextBlock Text="∑ 计算规则向导" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Button Content="＋ 新增计算" Command="{Binding AddCommand}" Margin="0,0,6,0" Padding="12,6" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"/>
+                                        <Button Content="删除" Command="{Binding DeleteCommand}" Margin="0,0,6,0" Padding="12,6" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"/>
+                                        <Button Content="刷新" Command="{Binding RefreshCommand}" Padding="12,6"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <DataGrid Grid.Row="1" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule}" AutoGenerateColumns="False"
+                                          CanUserAddRows="False" IsReadOnly="True" Height="150" Margin="0,0,0,12">
                                     <DataGrid.Columns>
                                         <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled}" Width="55"/>
-                                        <DataGridTextColumn Header="规则标识" Binding="{Binding RuleId}" Width="120"/>
-                                        <DataGridTextColumn Header="输入 TagName（逗号分隔）" Binding="{Binding InputTags}" Width="2*"/>
-                                        <DataGridTextColumn Header="表达式" Binding="{Binding Expression}" Width="2*"/>
-                                        <DataGridTextColumn Header="目标 TagId" Binding="{Binding TargetTagId}" Width="140"/>
-                                        <DataGridTextColumn Header="目标名称" Binding="{Binding TargetTagName}" Width="140"/>
-                                        <DataGridComboBoxColumn Header="类型" SelectedItemBinding="{Binding TargetDataType}" ItemsSource="{Binding DataContext.NumericTypes, RelativeSource={RelativeSource AncestorType=DataGrid}}" Width="100"/>
+                                        <DataGridTextColumn Header="输出名称" Binding="{Binding Name}" Width="*"/>
+                                        <DataGridTextColumn Header="输入数据点" Binding="{Binding Inputs}" Width="2*"/>
+                                        <DataGridTextColumn Header="公式" Binding="{Binding Formula}" Width="*"/>
                                     </DataGrid.Columns>
                                 </DataGrid>
-                                <Grid Grid.Row="2" Margin="0,10,0,0"><TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextMutedBrush}"/><Button Content="保存并热加载" Command="{Binding SaveCommand}" HorizontalAlignment="Right" Padding="16,7" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"/></Grid>
+
+                                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <Border Background="{DynamicResource BrushBgTertiary}" CornerRadius="6" Padding="14" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock Text="① 选择第一个输入数据点" FontWeight="SemiBold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,6"/>
+                                                <ComboBox ItemsSource="{Binding AvailableInputs}" SelectedItem="{Binding InputA}" DisplayMemberPath="DisplayText" Height="34"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Background="{DynamicResource BrushBgTertiary}" CornerRadius="6" Padding="14" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock Text="② 选择计算方式" FontWeight="SemiBold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,6"/>
+                                                <ComboBox ItemsSource="{Binding Operations}" SelectedItem="{Binding Operation}" DisplayMemberPath="Name" Height="34"/>
+                                                <StackPanel Margin="0,8,0,0">
+                                                    <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding RequiresInputB}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
+                                                    <TextBlock Text="第二个输入数据点 B" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                                                    <ComboBox ItemsSource="{Binding AvailableInputs}" SelectedItem="{Binding InputB}" DisplayMemberPath="DisplayText" Height="34"/>
+                                                </StackPanel>
+                                                <StackPanel Margin="0,8,0,0">
+                                                    <StackPanel.Style><Style TargetType="StackPanel"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding RequiresFactor}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></StackPanel.Style>
+                                                    <TextBlock Text="系数（不能为 0）" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                                                    <TextBox Text="{Binding Factor, UpdateSourceTrigger=PropertyChanged}" Height="34" Padding="8,0" VerticalContentAlignment="Center"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Background="{DynamicResource BrushBgTertiary}" CornerRadius="6" Padding="14" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <TextBlock Text="③ 给计算结果命名" FontWeight="SemiBold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,6"/>
+                                                <TextBox Text="{Binding OutputName, UpdateSourceTrigger=PropertyChanged}" Height="34" Padding="8,0" VerticalContentAlignment="Center"/>
+                                                <CheckBox Content="启用并参与实时计算" IsChecked="{Binding Enabled}" Margin="0,8,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Background="{DynamicResource PanelBgBrush}" BorderBrush="{DynamicResource InfoBrush}" BorderThickness="1" CornerRadius="6" Padding="14">
+                                            <StackPanel>
+                                                <TextBlock Text="④ 确认自动生成结果" FontWeight="SemiBold" Foreground="{DynamicResource InfoBrush}"/>
+                                                <TextBlock Text="{Binding PreviewExpression, StringFormat=公式：{0}}" FontFamily="Consolas" FontSize="15" Margin="0,8,0,4" Foreground="{DynamicResource WarningBrush}"/>
+                                                <TextBlock Text="{Binding PreviewSummary}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+
+                                <Grid Grid.Row="3" Margin="0,12,0,0">
+                                    <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,150,0"/>
+                                    <Button Content="保存并立即生效" Command="{Binding SaveCommand}" HorizontalAlignment="Right" Padding="18,8" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"/>
+                                </Grid>
                             </Grid>
                         </Border>
 

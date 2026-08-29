@@ -1,37 +1,108 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text.Json;
 using IndustrialDAQ.Core.Models;
+using IndustrialDAQ.Core.ResourceTree;
 using IndustrialDAQ.Infrastructure.Processing;
 using IndustrialDAQ.Processing;
 using IndustrialDAQ.UI.Services;
+using Prism.Commands;
+using Prism.Mvvm;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
-/// <summary>计算规则配置入口，持久化后立即刷新数据加工引擎。</summary>
+/// <summary>傻瓜式计算规则向导：选择数据点和运算方式，系统自动生成表达式与虚拟数据点。</summary>
 public sealed class CalculationRuleManagementViewModel : BindableBase
 {
     private readonly CalculationRuleRepository _repository;
     private readonly DataProcessor _processor;
+    private readonly IResourceTreeService _resourceTree;
+    private readonly CalculationResourceSynchronizer _resourceSynchronizer;
     private readonly IAuthManager _authManager;
-    private CalculationRuleItem? _selectedRule;
-    private string _statusText = "计算规则由实时数据变化自动触发";
+    private readonly SecurityAuditService _audit;
+    private CalculationRuleListItem? _selectedRule;
+    private CalculationTagOption? _inputA;
+    private CalculationTagOption? _inputB;
+    private CalculationOperationOption _operation;
+    private string _editingRuleId = string.Empty;
+    private string _outputName = string.Empty;
+    private double _factor = 1;
+    private bool _enabled = true;
+    private string _statusText = "点击“新增计算”开始四步配置";
 
-    public ObservableCollection<CalculationRuleItem> Rules { get; } = [];
-    public IReadOnlyList<TagDataType> NumericTypes { get; } = [TagDataType.Int16, TagDataType.Int32, TagDataType.Int64, TagDataType.UInt16, TagDataType.UInt32, TagDataType.Float32, TagDataType.Float64];
-    public CalculationRuleItem? SelectedRule { get => _selectedRule; set { SetProperty(ref _selectedRule, value); DeleteCommand.RaiseCanExecuteChanged(); } }
-    public string StatusText { get => _statusText; set => SetProperty(ref _statusText, value); }
+    public ObservableCollection<CalculationRuleListItem> Rules { get; } = [];
+    public ObservableCollection<CalculationTagOption> AvailableInputs { get; } = [];
+    public IReadOnlyList<CalculationOperationOption> Operations { get; } = CalculationOperationOption.All;
     public bool CanModify => _authManager.CanModify;
+    public bool RequiresInputB => Operation.RequiresInputB;
+    public bool RequiresFactor => Operation.RequiresFactor;
+    public string PreviewExpression => BuildExpression();
+    public string PreviewSummary => string.IsNullOrWhiteSpace(OutputName)
+        ? "请填写输出名称"
+        : $"{InputA?.DisplayText ?? "未选择"} → {Operation.Name} → Calculated/{EditingRuleId}\n输出：{OutputName}";
+    public string StatusText { get => _statusText; set => SetProperty(ref _statusText, value); }
+    public string EditingRuleId { get => _editingRuleId; private set { SetProperty(ref _editingRuleId, value); RaisePropertyChanged(nameof(PreviewSummary)); } }
+    public string OutputName { get => _outputName; set { SetProperty(ref _outputName, value); RaisePreview(); SaveCommand.RaiseCanExecuteChanged(); } }
+    public double Factor { get => _factor; set { SetProperty(ref _factor, value); RaisePreview(); SaveCommand.RaiseCanExecuteChanged(); } }
+    public bool Enabled { get => _enabled; set => SetProperty(ref _enabled, value); }
+
+    public CalculationRuleListItem? SelectedRule
+    {
+        get => _selectedRule;
+        set
+        {
+            if (SetProperty(ref _selectedRule, value) && value is not null) LoadEditor(value.Rule);
+            DeleteCommand.RaiseCanExecuteChanged();
+        }
+    }
+
+    public CalculationTagOption? InputA
+    {
+        get => _inputA;
+        set { SetProperty(ref _inputA, value); RaisePreview(); SaveCommand.RaiseCanExecuteChanged(); }
+    }
+
+    public CalculationTagOption? InputB
+    {
+        get => _inputB;
+        set { SetProperty(ref _inputB, value); RaisePreview(); SaveCommand.RaiseCanExecuteChanged(); }
+    }
+
+    public CalculationOperationOption Operation
+    {
+        get => _operation;
+        set
+        {
+            if (!SetProperty(ref _operation, value)) return;
+            RaisePropertyChanged(nameof(RequiresInputB));
+            RaisePropertyChanged(nameof(RequiresFactor));
+            RaisePreview();
+            SaveCommand.RaiseCanExecuteChanged();
+        }
+    }
+
     public DelegateCommand AddCommand { get; }
     public DelegateCommand SaveCommand { get; }
     public DelegateCommand DeleteCommand { get; }
     public DelegateCommand RefreshCommand { get; }
 
-    public CalculationRuleManagementViewModel(CalculationRuleRepository repository, DataProcessor processor, IAuthManager authManager)
+    public CalculationRuleManagementViewModel(
+        CalculationRuleRepository repository,
+        DataProcessor processor,
+        IResourceTreeService resourceTree,
+        CalculationResourceSynchronizer resourceSynchronizer,
+        IAuthManager authManager,
+        SecurityAuditService audit)
     {
         _repository = repository;
         _processor = processor;
+        _resourceTree = resourceTree;
+        _resourceSynchronizer = resourceSynchronizer;
         _authManager = authManager;
-        AddCommand = new DelegateCommand(Add, () => CanModify);
-        SaveCommand = new DelegateCommand(SaveAsync, () => CanModify);
+        _audit = audit;
+        _operation = Operations[0];
+        AddCommand = new DelegateCommand(StartNew, () => CanModify);
+        SaveCommand = new DelegateCommand(SaveAsync, () => CanModify && CanSave());
         DeleteCommand = new DelegateCommand(DeleteAsync, () => CanModify && SelectedRule is not null);
         RefreshCommand = new DelegateCommand(RefreshAsync);
         _authManager.CurrentUserChanged += (_, _) =>
@@ -42,72 +113,184 @@ public sealed class CalculationRuleManagementViewModel : BindableBase
         _ = LoadAsync();
     }
 
-    private void Add()
+    private void StartNew()
     {
-        var item = new CalculationRuleItem { RuleId = "calc-" + Guid.NewGuid().ToString("N")[..8], Enabled = true };
-        Rules.Add(item);
-        SelectedRule = item;
+        SelectedRule = null;
+        EditingRuleId = "calc-" + Guid.NewGuid().ToString("N")[..8];
+        InputA = null; InputB = null; Operation = Operations[0]; Factor = 1; OutputName = "新计算量"; Enabled = true;
+        StatusText = "按顺序完成：输入 A → 运算 → 输出名称 → 保存";
     }
 
     private async void SaveAsync()
     {
         try
         {
-            foreach (var item in Rules) await _repository.UpsertAsync(item.ToDomain());
-            await ReloadRuntimeAsync();
-            StatusText = $"已保存并热加载 {Rules.Count} 条计算规则";
+            var rule = BuildRule();
+            await _repository.UpsertAsync(rule);
+            var rules = await ReloadRuntimeAsync();
+            await _audit.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "CalculationRuleSaved", $"Calculated/{rule.RuleId}", $"Expression={rule.Expression};Target={rule.TargetTagId}", true);
+            LoadRulesIntoUi(rules, rule.RuleId);
+            StatusText = $"✓ {rule.TargetTagName} 已保存，输入变化时自动计算";
         }
-        catch (Exception ex) { StatusText = "保存失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = "✗ 保存失败：" + ex.Message; }
     }
 
     private async void DeleteAsync()
     {
         if (SelectedRule is null) return;
-        await _repository.DeleteAsync(SelectedRule.RuleId);
-        Rules.Remove(SelectedRule);
-        SelectedRule = null;
-        await ReloadRuntimeAsync();
-        StatusText = "规则已删除并从运行时移除";
+        var rule = SelectedRule.Rule;
+        await _repository.DeleteAsync(rule.RuleId);
+        var rules = await ReloadRuntimeAsync();
+        await _audit.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "CalculationRuleDeleted", $"Calculated/{rule.RuleId}", rule.TargetTagName, true);
+        LoadRulesIntoUi(rules);
+        StartNew();
+        StatusText = "规则和虚拟数据点已删除";
     }
 
     private async void RefreshAsync() => await LoadAsync();
 
     private async Task LoadAsync()
     {
+        await _resourceTree.ReloadAsync();
+        LoadAvailableInputs();
         var rules = await _repository.LoadAsync();
-        Rules.Clear();
-        foreach (var rule in rules) Rules.Add(CalculationRuleItem.FromDomain(rule));
         _processor.ReplaceRules(rules);
-        StatusText = $"已加载 {Rules.Count} 条计算规则";
+        await _resourceSynchronizer.SyncAsync(rules);
+        LoadRulesIntoUi(rules);
+        if (Rules.Count == 0) StartNew();
+        StatusText = Rules.Count == 0 ? "暂无计算规则，请按四步新增" : $"已加载 {Rules.Count} 条计算规则";
     }
 
-    private async Task ReloadRuntimeAsync() => _processor.ReplaceRules(await _repository.LoadAsync());
+    private async Task<IReadOnlyList<CalculationRule>> ReloadRuntimeAsync()
+    {
+        var rules = await _repository.LoadAsync();
+        _processor.ReplaceRules(rules);
+        await _resourceSynchronizer.SyncAsync(rules);
+        LoadAvailableInputs();
+        return rules;
+    }
+
+    private void LoadRulesIntoUi(IReadOnlyList<CalculationRule> rules, string? selectedRuleId = null)
+    {
+        Rules.Clear();
+        foreach (var rule in rules) Rules.Add(new CalculationRuleListItem(rule));
+        SelectedRule = Rules.FirstOrDefault(item => item.Rule.RuleId == selectedRuleId) ?? Rules.FirstOrDefault();
+    }
+
+    private void LoadAvailableInputs()
+    {
+        AvailableInputs.Clear();
+        foreach (var node in _resourceTree.Current.Nodes.Where(node => node.ResourceType == ResourceType.Tag && node.IsEnabled))
+        {
+            if (!TryReadTagMetadata(node, out var tagId, out var dataType) || !IsNumeric(dataType)) continue;
+            AvailableInputs.Add(new CalculationTagOption(node.Path.Value, tagId, node.DisplayName, dataType));
+        }
+    }
+
+    private void LoadEditor(CalculationRule rule)
+    {
+        EditingRuleId = rule.RuleId;
+        OutputName = rule.TargetTagName;
+        Enabled = rule.Enabled;
+        var inputs = rule.EffectiveInputs;
+        InputA = FindOption(inputs.ElementAtOrDefault(0));
+        InputB = FindOption(inputs.ElementAtOrDefault(1));
+        Operation = CalculationOperationOption.Infer(rule.Expression, inputs.Count, out var factor);
+        Factor = factor;
+    }
+
+    private CalculationTagOption? FindOption(CalculationInputBinding? input) => input is null ? null :
+        AvailableInputs.FirstOrDefault(option => option.TagId == input.TagId) ??
+        AvailableInputs.FirstOrDefault(option => option.DisplayName == input.TagName);
+
+    private CalculationRule BuildRule()
+    {
+        if (!CanSave()) throw new InvalidOperationException("请完成输入、运算方式和输出名称。");
+        var inputs = new List<CalculationInputBinding> { InputA!.ToBinding("A") };
+        if (RequiresInputB) inputs.Add(InputB!.ToBinding("B"));
+        return new CalculationRule
+        {
+            RuleId = EditingRuleId,
+            Inputs = inputs,
+            Expression = BuildExpression(),
+            TargetTagId = "virtual-" + EditingRuleId,
+            TargetTagName = OutputName.Trim(),
+            TargetDataType = TagDataType.Float64,
+            Enabled = Enabled
+        };
+    }
+
+    private bool CanSave() => !string.IsNullOrWhiteSpace(EditingRuleId) && InputA is not null &&
+        (!RequiresInputB || InputB is not null) && (!RequiresFactor || Math.Abs(Factor) > double.Epsilon) &&
+        !string.IsNullOrWhiteSpace(OutputName);
+
+    private string BuildExpression() => Operation.BuildExpression(Factor);
+
+    private void RaisePreview()
+    {
+        RaisePropertyChanged(nameof(PreviewExpression));
+        RaisePropertyChanged(nameof(PreviewSummary));
+    }
+
+    private static bool TryReadTagMetadata(ResourceNode node, out string tagId, out TagDataType dataType)
+    {
+        tagId = string.Empty; dataType = TagDataType.String;
+        try
+        {
+            using var document = JsonDocument.Parse(node.MetadataJson ?? "{}");
+            tagId = document.RootElement.TryGetProperty("tagId", out var id) ? id.GetString() ?? string.Empty : node.Id;
+            return document.RootElement.TryGetProperty("dataType", out var type) && Enum.TryParse(type.GetString(), true, out dataType);
+        }
+        catch { return false; }
+    }
+
+    private static bool IsNumeric(TagDataType type) => type is TagDataType.Int16 or TagDataType.Int32 or TagDataType.Int64 or TagDataType.UInt16 or TagDataType.UInt32 or TagDataType.Float32 or TagDataType.Float64;
 }
 
-public sealed class CalculationRuleItem : BindableBase
+public sealed record CalculationTagOption(string ResourcePath, string TagId, string DisplayName, TagDataType DataType)
 {
-    private string _ruleId = string.Empty, _expression = string.Empty, _inputTags = string.Empty, _targetTagId = string.Empty, _targetTagName = string.Empty;
-    private TagDataType _targetDataType = TagDataType.Float64;
-    private bool _enabled;
-    public string RuleId { get => _ruleId; set => SetProperty(ref _ruleId, value); }
-    public string Expression { get => _expression; set => SetProperty(ref _expression, value); }
-    public string InputTags { get => _inputTags; set => SetProperty(ref _inputTags, value); }
-    public string TargetTagId { get => _targetTagId; set => SetProperty(ref _targetTagId, value); }
-    public string TargetTagName { get => _targetTagName; set => SetProperty(ref _targetTagName, value); }
-    public TagDataType TargetDataType { get => _targetDataType; set => SetProperty(ref _targetDataType, value); }
-    public bool Enabled { get => _enabled; set => SetProperty(ref _enabled, value); }
+    public string DisplayText => $"{ResourcePath} · {DisplayName}";
+    public CalculationInputBinding ToBinding(string alias) => new() { Alias = alias, TagId = TagId, TagName = DisplayName, ResourcePath = ResourcePath };
+}
 
-    public CalculationRule ToDomain() => new()
+public sealed record CalculationOperationOption(string Key, string Name, bool RequiresInputB, bool RequiresFactor)
+{
+    public static IReadOnlyList<CalculationOperationOption> All { get; } =
+    [
+        new("copy", "直接取值 A", false, false), new("add", "A + B 相加", true, false),
+        new("subtract", "A - B 相减", true, false), new("average", "A、B 平均值", true, false),
+        new("multiply", "A × 系数", false, true), new("divide", "A ÷ 系数", false, true),
+        new("percent", "A 占 B 的百分比", true, false)
+    ];
+
+    public string BuildExpression(double factor) => Key switch
     {
-        RuleId = RuleId.Trim(), Expression = Expression.Trim(),
-        InputTagNames = InputTags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-        TargetTagId = TargetTagId.Trim(), TargetTagName = string.IsNullOrWhiteSpace(TargetTagName) ? TargetTagId.Trim() : TargetTagName.Trim(),
-        TargetDataType = TargetDataType, Enabled = Enabled
+        "add" => "A + B", "subtract" => "A - B", "average" => "(A + B) / 2",
+        "multiply" => $"A * {factor.ToString("R", CultureInfo.InvariantCulture)}",
+        "divide" => $"A / {factor.ToString("R", CultureInfo.InvariantCulture)}",
+        "percent" => "(A / B) * 100", _ => "A"
     };
 
-    public static CalculationRuleItem FromDomain(CalculationRule rule) => new()
+    public static CalculationOperationOption Infer(string expression, int inputCount, out double factor)
     {
-        RuleId = rule.RuleId, Expression = rule.Expression, InputTags = string.Join(", ", rule.InputTagNames), TargetTagId = rule.TargetTagId,
-        TargetTagName = rule.TargetTagName, TargetDataType = rule.TargetDataType, Enabled = rule.Enabled
-    };
+        factor = 1;
+        var normalized = expression.Replace(" ", string.Empty);
+        if (normalized == "A+B") return All[1];
+        if (normalized == "A-B") return All[2];
+        if (normalized == "(A+B)/2") return All[3];
+        if (normalized == "(A/B)*100") return All[6];
+        if (normalized.StartsWith("A*", StringComparison.Ordinal) && double.TryParse(normalized[2..], NumberStyles.Float, CultureInfo.InvariantCulture, out factor)) return All[4];
+        if (normalized.StartsWith("A/", StringComparison.Ordinal) && double.TryParse(normalized[2..], NumberStyles.Float, CultureInfo.InvariantCulture, out factor)) return All[5];
+        return inputCount > 1 ? All[1] : All[0];
+    }
+}
+
+public sealed class CalculationRuleListItem
+{
+    public CalculationRule Rule { get; }
+    public string Name => Rule.TargetTagName;
+    public string Inputs => string.Join("、", Rule.EffectiveInputs.Select(input => input.TagName));
+    public string Formula => Rule.Expression;
+    public bool Enabled => Rule.Enabled;
+    public CalculationRuleListItem(CalculationRule rule) => Rule = rule;
 }

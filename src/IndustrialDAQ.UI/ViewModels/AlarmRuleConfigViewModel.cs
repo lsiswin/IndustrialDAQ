@@ -23,6 +23,7 @@ namespace IndustrialDAQ.UI.ViewModels;
 /// </summary>
 public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
 {
+    private Task? _initializationTask;
     private readonly IAlarmDefinitionRepository _repository;
     private readonly IAlarmDefinitionService _alarmDefinitionService;
     private readonly IResourceTreeService _resourceTreeService;
@@ -78,6 +79,11 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
     }
 
     public IEnumerable<AlarmSeverity> Severities => Enum.GetValues<AlarmSeverity>();
+    public IReadOnlyList<AlarmSeverityChoice> SeverityChoices { get; } =
+    [
+        new(AlarmSeverity.Info, "提示"), new(AlarmSeverity.Warning, "警告"),
+        new(AlarmSeverity.Critical, "严重")
+    ];
 
     private AlarmSeverity _severity = AlarmSeverity.Warning;
     public AlarmSeverity Severity
@@ -122,7 +128,10 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
             {
                 // 空数据点名称不能作为 ResourcePath 解析，避免保存后回填失败。
                 if (!string.IsNullOrWhiteSpace(value))
+                {
                     _resolvedTagId = ResolveTagId(value);
+                    if (!IsEditMode) ApplyFriendlyDefaults(value);
+                }
                 RaisePropertyChanged(nameof(CanSave));
                 RaisePropertyChanged(nameof(PreviewSummary));
             }
@@ -177,6 +186,13 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
     // ── 触发条件（向导式） ──
     public IEnumerable<AlarmOperator> Operators => Enum.GetValues<AlarmOperator>()
         .Where(op => op != AlarmOperator.RateOfChange);
+    public IReadOnlyList<AlarmOperatorChoice> OperatorChoices { get; } =
+    [
+        new(AlarmOperator.GreaterThan, "大于"), new(AlarmOperator.GreaterThanOrEqual, "大于或等于"),
+        new(AlarmOperator.LessThan, "小于"), new(AlarmOperator.LessThanOrEqual, "小于或等于"),
+        new(AlarmOperator.Equal, "等于"), new(AlarmOperator.NotEqual, "不等于"),
+        new(AlarmOperator.InRange, "位于区间"), new(AlarmOperator.OutOfRange, "超出区间")
+    ];
 
     private AlarmOperator _selectedOperator = AlarmOperator.GreaterThan;
     public AlarmOperator SelectedOperator
@@ -302,6 +318,7 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
         !string.IsNullOrWhiteSpace(AlarmCode) &&
         (!string.IsNullOrWhiteSpace(SelectedResourcePath) ||
          (UseCustomResourcePath && !string.IsNullOrWhiteSpace(CustomTargetResourcePath))) &&
+        (UseCustomResourcePath || !string.IsNullOrWhiteSpace(SelectedTagName)) &&
         (!UseCustomCondition || !string.IsNullOrWhiteSpace(ConditionExpression));
 
     public AlarmRuleConfigViewModel(
@@ -324,6 +341,7 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
         SaveCommand = new DelegateCommand(OnSaveExecute, () => CanModify && CanSave)
             .ObservesProperty(() => AlarmCode)
             .ObservesProperty(() => SelectedResourcePath)
+            .ObservesProperty(() => SelectedTagName)
             .ObservesProperty(() => UseCustomResourcePath)
             .ObservesProperty(() => CustomTargetResourcePath)
             .ObservesProperty(() => UseCustomCondition)
@@ -340,6 +358,8 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
 
         // 设备树热重载（运行时增删设备）后，自动刷新资源路径下拉框
         _eventAggregator.GetEvent<ConfigurationReloadedEvent>().Subscribe(OnConfigurationReloaded);
+        // 本 ViewModel 嵌入系统设置子页面，不依赖 Prism 子视图导航回调进行首次加载。
+        _ = InitializeAsync();
     }
 
     private void OnConfigurationReloaded()
@@ -349,8 +369,20 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
 
     public async void OnNavigatedTo(NavigationContext navigationContext)
     {
+        await InitializeAsync();
+    }
+
+    private Task InitializeAsync()
+    {
+        // 嵌入加载与 Prism 导航可能同时触发，复用同一任务避免重复查询和重复刷新列表。
+        return _initializationTask ??= InitializeCoreAsync();
+    }
+
+    private async Task InitializeCoreAsync()
+    {
         await LoadResourceTreeAsync();
         await LoadRulesAsync();
+        if (!IsEditMode && string.IsNullOrWhiteSpace(RuleId)) OnCreateNew();
     }
 
     /// <summary>
@@ -381,7 +413,8 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
 
         foreach (var node in snapshot.Nodes.OrderBy(n => n.Path.Value))
         {
-            if (node.ResourceType is ResourceType.Tag or ResourceType.Device)
+            if (node.ResourceType == ResourceType.Device ||
+                (node.ResourceType == ResourceType.Area && snapshot.GetChildren(node.Path).Any(child => child.ResourceType == ResourceType.Tag)))
                 ResourcePaths.Add(node.Path.Value);
         }
     }
@@ -459,6 +492,15 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
         CustomResourcePath = null;
         CustomTargetResourcePath = null;
         CustomTagId = null;
+    }
+
+    private void ApplyFriendlyDefaults(string tagPath)
+    {
+        var tagName = tagPath.Split('/').Last();
+        var operatorName = SelectedOperator is AlarmOperator.LessThan or AlarmOperator.LessThanOrEqual ? "LOW" : "HIGH";
+        AlarmCode = $"{tagName.Replace('.', '_').Replace(' ', '_')}_{operatorName}".ToUpperInvariant();
+        Title = $"{tagName} 超限报警";
+        MessageTemplate = $"{tagName} 当前值 {{Value}}，触发阈值 {Threshold}";
     }
 
     private async void OnSaveExecute()
@@ -652,3 +694,6 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
         });
     }
 }
+
+public sealed record AlarmOperatorChoice(AlarmOperator Value, string Name);
+public sealed record AlarmSeverityChoice(AlarmSeverity Value, string Name);

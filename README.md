@@ -136,6 +136,7 @@ MQTT 驱动将数据点 `Address` 作为主题：读取时订阅主题并缓存�
 - 数据点必须通过资源树同步后，才能被规则、趋势和动态权限统一引用。
 - `alarm-definitions.json`、`permission-policies.json`、`calculation-rules.json` 支持文件变更热加载。
 - 业务代码不得写死设备、数据点、菜单权限或报警判断条件。
+- 计算规则与报警规则完整流程见 [`docs/CALCULATION_AND_ALARM_RULES.md`](docs/CALCULATION_AND_ALARM_RULES.md)。
 
 ## 验证
 
