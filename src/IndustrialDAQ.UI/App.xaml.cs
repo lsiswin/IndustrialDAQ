@@ -88,6 +88,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterInstance(_loggingLevelSwitch ??= new LoggingLevelSwitch(LogEventLevel.Information));
         containerRegistry.RegisterSingleton<HistoricalDataRetentionService>();
         containerRegistry.RegisterSingleton<RuntimeConfigurationHotReloadService>();
+        containerRegistry.RegisterSingleton<AlarmRuleProvisioningService>();
 
         containerRegistry.RegisterSingleton<IAuthorizationRepository, AuthorizationRepository>();
         containerRegistry.RegisterSingleton<IAuthorizationService, AuthorizationService>();
@@ -245,7 +246,7 @@ public partial class App : PrismApplication
         _ = trendEngine.StartAsync(CancellationToken.None);
 
         // ── 加载 JSON 配置并启动设备（内部完成设备启动后会注册报警规则+趋势Tag） ──
-        _ = LoadAndStartDevicesAsync(acquisitionHost, historyWriter, alarmManager, trendEngine);
+        _ = LoadAndStartDevicesAsync(acquisitionHost, historyWriter, trendEngine);
 
         // ── 导航到仪表板 ──
         var regionManager = Container.Resolve<IRegionManager>();
@@ -521,59 +522,6 @@ public partial class App : PrismApplication
     }
 
     /// <summary>
-    /// 注册测试报警规则到新报警定义仓储，用于开发调试。
-    /// TagId 匹配 production-line.json 中的实际配置。
-    /// </summary>
-    private void RegisterDynamicAlarmRules(AlarmManager alarmManager, AcquisitionHost host)
-    {
-        var allRules = new List<AlarmDefinition>();
-        var devices = host.GetDevices();
-
-        // ═══ 报警规则模板（按 TagName 匹配，与设备/驱动无关）═══
-        static AlarmDefinition MakeRule(string tagId, string tagName, string ruleId, string code,
-            AlarmType type, string condition, double? hysteresis,
-            AlarmSeverity severity, string title, string template, string source, int cooldown) => new()
-        {
-            RuleId = ruleId, AlarmCode = code, TagId = tagId, TagName = tagName,
-            AlarmType = type, ConditionExpression = condition,
-            Hysteresis = hysteresis ?? 0.0, Severity = severity,
-            Title = title, MessageTemplate = template, Source = source,
-            CooldownSeconds = cooldown
-        };
-
-        var ruleTemplates = new[]
-        {
-            ("Line.EStop",              "estop",       "LINE_ESTOP_ACTIVE",       AlarmType.Bool,   "Value == true",   (double?)null, AlarmSeverity.Critical, "急停按钮已触发",     "产线急停按钮已按下，请立即检查！", 5),
-            ("Line.AlarmActive",         "alarm-active","LINE_ALARM_ACTIVE",        AlarmType.Bool,   "Value == true",   (double?)null, AlarmSeverity.Critical, "产线设备报警",      "产线异常，请检查！",                5),
-            ("Filling.ActualLevel",      "fill-high",   "FILL_LEVEL_HIGH",          AlarmType.High,   "Value >= 700",    30.0,         AlarmSeverity.Warning,  "灌装液位偏高",      "灌装液位 {Value} mL 达到警戒线", 60),
-            ("Filling.ActualLevel",      "fill-highhigh","FILL_LEVEL_HIGH_HIGH",    AlarmType.HighHigh,"Value >= 800",    30.0,         AlarmSeverity.Critical,  "灌装液位超高",      "灌装液位 {Value} mL 超过高高限，有溢出风险！",60),
-            ("Conveyor.ActualSpeed",     "speed-high",  "CONVEYOR_SPEED_HIGH",      AlarmType.High,   "Value > 25",      2.0,          AlarmSeverity.Warning,  "传送速度偏高",      "传送速度 {Value} m/min 超过 25 m/min",15),
-            ("Conveyor.ActualSpeed",     "speed-low",   "CONVEYOR_SPEED_LOW",       AlarmType.Low,    "Value < 5",       2.0,          AlarmSeverity.Warning,  "传送速度偏低",      "传送速度 {Value} m/min 低于 5 m/min",15),
-        };
-
-        foreach (var device in devices)
-        {
-            foreach (var (tagName, ruleId, code, type, cond, hys, sev, title, tmpl, cd) in ruleTemplates)
-            {
-                var tag = device.Tags.FirstOrDefault(t => t.Name == tagName);
-                if (tag == null) continue;
-                var safe = string.IsNullOrEmpty(device.Name) ? "unknown" : new string(device.Name.TakeWhile(char.IsLetterOrDigit).ToArray());
-                allRules.Add(MakeRule(tag.Id, tag.Name, $"alm-{safe}-{ruleId}", code, type, cond, hys, sev, title, tmpl, device.Name ?? "未知设备", cd));
-            }
-        }
-
-        if (allRules.Count > 0)
-        {
-            alarmManager.RegisterRules([.. allRules]);
-            Log.Information("已动态注册 {Count} 条报警规则（覆盖 {DeviceCount} 台设备）", allRules.Count, devices.Count);
-        }
-        else
-        {
-            Log.Warning("未加载任何设备，跳过报警规则注册");
-        }
-    }
-
-    /// <summary>
     /// 注册趋势跟踪 Tag，并从新报警定义快照中生成趋势报警线。
     /// </summary>
     private void RegisterTrendTags(TrendEngine trendEngine, IAlarmDefinitionService definitionService, AcquisitionHost host)
@@ -635,7 +583,7 @@ public partial class App : PrismApplication
     /// <summary>
     /// 从配置目录中所有 JSON 文件加载设备并启动采集。
     /// </summary>
-    private async Task LoadAndStartDevicesAsync(AcquisitionHost host, HistoryWriter writer, AlarmManager alarmManager, TrendEngine trendEngine)
+    private async Task LoadAndStartDevicesAsync(AcquisitionHost host, HistoryWriter writer, TrendEngine trendEngine)
     {
         try
         {
@@ -694,8 +642,8 @@ public partial class App : PrismApplication
                 // 将实时设备树镜像到资源树，并刷新快照（报警页下拉框随即反映真实设备）
                 await SyncResourceTreeAsync(host);
 
-                // ── 设备就绪后动态注册报警规则（按实际设备的 TagId 生成）──
-                RegisterDynamicAlarmRules(alarmManager, host);
+                // 依据模板首次生成数据库规则，页面与运行时读取同一份持久化定义。
+                await Container.Resolve<AlarmRuleProvisioningService>().ProvisionAsync(host.GetDevices());
 
                 // ── 注册趋势跟踪 Tag（从实际设备中查找模拟量） ──
                 RegisterTrendTags(trendEngine, Container.Resolve<IAlarmDefinitionService>(), host);
@@ -706,8 +654,7 @@ public partial class App : PrismApplication
             Log.Error(ex, "加载配置文件失败，使用 Mock 设备");
             await StartMockDevices(host, writer);
             await SyncResourceTreeAsync(host);
-            // Mock 设备也需注册报警规则和趋势 Tag
-            RegisterDynamicAlarmRules(alarmManager, host);
+            await Container.Resolve<AlarmRuleProvisioningService>().ProvisionAsync(host.GetDevices());
             RegisterTrendTags(trendEngine, Container.Resolve<IAlarmDefinitionService>(), host);
         }
     }
@@ -927,6 +874,7 @@ public partial class App : PrismApplication
 
             // 设备已变更，重新将实时设备树镜像到资源树
             await SyncResourceTreeAsync(host);
+            await Container.Resolve<AlarmRuleProvisioningService>().ProvisionAsync(host.GetDevices());
         }
         catch (Exception ex)
         {

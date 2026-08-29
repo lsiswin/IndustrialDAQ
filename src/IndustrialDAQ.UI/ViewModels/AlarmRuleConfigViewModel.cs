@@ -519,7 +519,8 @@ public class AlarmRuleConfigViewModel : BindableBase, INavigationAware
                 ClearPolicy = AlarmClearPolicy.AutoClearWhenConditionFalse,
                 DelayMs = DelayMs,
                 Hysteresis = Hysteresis,
-                CooldownSeconds = CooldownSeconds
+                CooldownSeconds = CooldownSeconds,
+                MetadataJson = "{\"origin\":\"user\"}"
             };
 
             await _repository.UpsertAsync(def);

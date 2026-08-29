@@ -1,4 +1,6 @@
 // File: AlarmTemplate.cs  Module: Core (Models)  Author: IndustrialDAQ Team
+using System.Text.Json;
+using IndustrialDAQ.Core.ResourceTree;
 namespace IndustrialDAQ.Core.Models;
 
 /// <summary>
@@ -50,7 +52,12 @@ public sealed class AlarmTemplate
     /// <param name="tagName">测点名称。</param>
     /// <param name="source">来源设备名称。</param>
     /// <returns>报警规则列表（每个支持的报警类型生成一条规则）。</returns>
-    public IReadOnlyList<AlarmDefinition> CreateRules(string tagId, string tagName, string source)
+    public IReadOnlyList<AlarmDefinition> CreateRules(
+        string tagId,
+        string tagName,
+        string source,
+        ResourcePath? targetResourcePath = null,
+        string? ruleIdPrefix = null)
     {
         var rules = new List<AlarmDefinition>();
 
@@ -75,14 +82,12 @@ public sealed class AlarmTemplate
                 _ => Severity
             };
 
-            string condition = alarmType switch
+            var alarmOperator = alarmType switch
             {
-                AlarmType.High => $"Value > {threshold}",
-                AlarmType.HighHigh => $"Value > {threshold}",
-                AlarmType.Low => $"Value < {threshold}",
-                AlarmType.LowLow => $"Value < {threshold}",
-                AlarmType.Bool => "Value == true",
-                _ => "false"
+                AlarmType.High or AlarmType.HighHigh => AlarmOperator.GreaterThan,
+                AlarmType.Low or AlarmType.LowLow => AlarmOperator.LessThan,
+                AlarmType.Bool => AlarmOperator.Equal,
+                _ => AlarmOperator.Equal
             };
 
             string title = $"{tagName} {alarmType} 报警";
@@ -90,20 +95,30 @@ public sealed class AlarmTemplate
                 ? $"{tagName} 状态报警"
                 : $"{tagName} {{Value}} {Unit} 超限 ({alarmType}: {threshold})";
 
+            var alarmCode = $"{tagName.Replace('.', '_').Replace(' ', '_')}_{alarmType}".ToUpperInvariant();
+            var stablePrefix = string.IsNullOrWhiteSpace(ruleIdPrefix) ? tagId : ruleIdPrefix;
+            var ruleId = $"template-{stablePrefix}-{alarmType}".ToLowerInvariant();
             rules.Add(new AlarmDefinition
             {
-                AlarmCode = $"{tagName.Replace('.', '_').Replace(' ', '_')}_{alarmType}".ToUpperInvariant(),
+                Id = ruleId,
+                RuleId = ruleId,
+                AlarmCode = alarmCode,
+                TargetResourcePath = targetResourcePath,
+                ResourcePath = targetResourcePath is null ? null : new ResourcePath($"{targetResourcePath.Value}/Alarm/{alarmCode}"),
                 TagId = tagId,
                 TagName = tagName,
                 AlarmType = alarmType,
-                ConditionExpression = condition,
+                Operator = alarmOperator,
+                Threshold = alarmType == AlarmType.Bool ? 1 : threshold,
+                ConditionExpression = alarmType == AlarmType.Bool ? "Value == true" : string.Empty,
                 Hysteresis = Hysteresis,
                 Severity = severity,
                 Title = title,
                 MessageTemplate = messageTemplate,
                 Source = source,
                 IsEnabled = true,
-                CooldownSeconds = CooldownSeconds
+                CooldownSeconds = CooldownSeconds,
+                MetadataJson = JsonSerializer.Serialize(new { origin = "template", templateId = TemplateId })
             });
         }
 

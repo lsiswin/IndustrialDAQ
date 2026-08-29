@@ -106,6 +106,7 @@ public static class DeviceConfigurationLoader
         public double Deadband { get; set; }
         public string Access { get; set; } = "Read";
         public string? Description { get; set; }
+        public string? TemplateId { get; set; }
 
         /// <summary>寄存器内位索引（0-15），用于 Bool 在 HR/IR 上的按位读写。</summary>
         public int BitIndex { get; set; } = -1;
@@ -134,7 +135,8 @@ public static class DeviceConfigurationLoader
                 Deadband = Deadband,
                 Access = Enum.Parse<TagAccess>(Access, ignoreCase: true),
                 Description = Description ?? string.Empty,
-                BitIndex = BitIndex
+                BitIndex = BitIndex,
+                TemplateId = TemplateId
             };
         }
     }

@@ -50,7 +50,8 @@
         "s7Address": "DB1.DBX0.3",
         "dataType": "Bool",
         "access": "ReadWrite",
-        "description": "急停"
+        "description": "急停",
+        "templateId": "dp-line-estop"
       },
       {
         "id": "tag-filling-setlevel",
@@ -80,7 +81,8 @@
         "s7Address": "DB1.DBX2.0",
         "dataType": "Bool",
         "access": "Read",
-        "description": "产线运行状态"
+        "description": "产线运行状态",
+        "templateId": "dp-line-running"
       },
       {
         "id": "tag-line-alarmactive",
@@ -100,7 +102,8 @@
         "s7Address": "DB1.DBD12",
         "dataType": "Float32",
         "access": "Read",
-        "description": "实际灌装液位 (mL)"
+        "description": "实际灌装液位 (mL)",
+        "templateId": "dp-filling-level"
       },
       {
         "id": "tag-filling-valveopen",
@@ -110,7 +113,8 @@
         "s7Address": "DB1.DBX4.0",
         "dataType": "Bool",
         "access": "Read",
-        "description": "灌装阀状态"
+        "description": "灌装阀状态",
+        "templateId": "dp-filling-valve"
       },
       {
         "id": "tag-conveyor-actualspeed",
@@ -120,7 +124,8 @@
         "s7Address": "DB1.DBD16",
         "dataType": "Float32",
         "access": "Read",
-        "description": "实际传送速度 (m/min)"
+        "description": "实际传送速度 (m/min)",
+        "templateId": "dp-conveyor-speed"
       },
       {
         "id": "tag-conveyor-running",
@@ -140,7 +145,8 @@
         "s7Address": "DB1.DBD20",
         "dataType": "Int32",
         "access": "Read",
-        "description": "总产量计数"
+        "description": "总产量计数",
+        "templateId": "dp-line-count"
       }
     ]
   },
@@ -251,7 +257,8 @@
         "modbusAddress": "40006",
         "dataType": "Float32",
         "access": "Read",
-        "description": "实际液位 (HR 5-6)"
+        "description": "实际液位 (HR 5-6)",
+        "templateId": "dp-mb-level"
       },
       {
         "id": "mb-ir-speed",
@@ -259,7 +266,8 @@
         "modbusAddress": "40008",
         "dataType": "Float32",
         "access": "Read",
-        "description": "实际速度 (HR 7-8)"
+        "description": "实际速度 (HR 7-8)",
+        "templateId": "dp-mb-speed"
       },
       {
         "id": "mb-ir-count",
@@ -267,7 +275,8 @@
         "modbusAddress": "40010",
         "dataType": "Int32",
         "access": "Read",
-        "description": "总产量 (HR 9-10)"
+        "description": "总产量 (HR 9-10)",
+        "templateId": "dp-mb-count"
       }
     ]
   }
