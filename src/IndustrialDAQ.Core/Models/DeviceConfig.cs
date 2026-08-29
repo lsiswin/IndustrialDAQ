@@ -38,6 +38,14 @@ public sealed class DeviceConfig
     /// <summary>Maximum reconnection attempts before raising an alarm.</summary>
     public int RetryCount { get; init; } = 3;
 
+    /// <summary>OPC UA 用户名；留空时使用匿名身份。</summary>
+    public string? OpcUaUsername { get; init; }
+
+    /// <summary>
+    /// 保存 OPC UA 密码的环境变量名称。配置文件只保存变量名，不保存密码明文。
+    /// </summary>
+    public string? OpcUaPasswordEnvironmentVariable { get; init; }
+
     /// <summary>Tag points belonging to this device.</summary>
     public List<TagPoint> Tags { get; init; } = new();
 }

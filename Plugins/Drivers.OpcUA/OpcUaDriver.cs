@@ -17,13 +17,12 @@ public sealed class OpcUaDriver : IProtocolDriver
     private ApplicationInstance? _application;
     private bool _connected;
     private string _endpointUrl;
-    private string? OpcUaUsername = "cold";
+    private readonly string? _username;
+    private readonly string? _passwordEnvironmentVariable;
     private readonly int _timeoutMs;
 
     public string DriverType => "OpcUA";
     public bool IsConnected => _connected;
-
-    public string OpcUaPassword { get; private set; } = "Leng520..";
 
     /// <summary>
     /// 构造 OPC UA 驱动（无参，需后续配置）。
@@ -41,6 +40,10 @@ public sealed class OpcUaDriver : IProtocolDriver
     {
         _endpointUrl = $"opc.tcp://{config.IpAddress}:{config.Port}";
         _timeoutMs = config.TimeoutMs > 0 ? config.TimeoutMs : 3000;
+        _username = string.IsNullOrWhiteSpace(config.OpcUaUsername) ? null : config.OpcUaUsername.Trim();
+        _passwordEnvironmentVariable = string.IsNullOrWhiteSpace(config.OpcUaPasswordEnvironmentVariable)
+            ? null
+            : config.OpcUaPasswordEnvironmentVariable.Trim();
     }
 
     /// <inheritdoc />
@@ -119,8 +122,18 @@ public sealed class OpcUaDriver : IProtocolDriver
 
         // 构建用户身份
         IUserIdentity identity;
-        if (!string.IsNullOrEmpty(OpcUaUsername))
-            identity = new UserIdentity(OpcUaUsername, OpcUaPassword);
+        if (!string.IsNullOrEmpty(_username))
+        {
+            if (string.IsNullOrWhiteSpace(_passwordEnvironmentVariable))
+                throw new InvalidOperationException("OPC UA 用户认证必须配置密码环境变量名称。");
+
+            // 密码只在连接瞬间从进程环境读取，不进入代码、JSON 配置或日志。
+            var password = Environment.GetEnvironmentVariable(_passwordEnvironmentVariable);
+            if (string.IsNullOrEmpty(password))
+                throw new InvalidOperationException($"未设置 OPC UA 密码环境变量 '{_passwordEnvironmentVariable}'。");
+
+            identity = new UserIdentity(_username, password);
+        }
         else
             identity = new UserIdentity(new AnonymousIdentityToken());
 
