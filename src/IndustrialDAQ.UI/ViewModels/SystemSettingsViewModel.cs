@@ -5,6 +5,7 @@ using Prism.Commands;
 using Prism.Mvvm;
 using System.Windows;
 using System.Linq;
+using System.IO;
 using IndustrialDAQ.UI.Services;
 
 namespace IndustrialDAQ.UI.ViewModels;
@@ -15,6 +16,8 @@ namespace IndustrialDAQ.UI.ViewModels;
 public class SystemSettingsViewModel : BindableBase
 {
     private readonly IAuthManager _authManager;
+    private readonly RuntimeSettingsService _settingsService;
+    private readonly SecurityAuditService _auditService;
     public bool CanModify => _authManager.CanModify;
     /// <summary>报警规则子页面 ViewModel，显式绑定以避免继承系统设置的 DataContext。</summary>
     public AlarmRuleConfigViewModel AlarmRuleConfig { get; }
@@ -39,19 +42,23 @@ public class SystemSettingsViewModel : BindableBase
     public DelegateCommand ResetCommand { get; }
 
     /// <summary>数据库路径。</summary>
-    public string DatabasePath { get; set; } = "industrialdaq.db";
+    public string DatabasePath { get; } = Path.Combine(AppContext.BaseDirectory, "industrialdaq.db");
 
     /// <summary>历史数据保留天数。</summary>
-    public int HistoryRetentionDays { get; set; } = 90;
+    private int _historyRetentionDays = 90;
+    public int HistoryRetentionDays { get => _historyRetentionDays; set => SetProperty(ref _historyRetentionDays, value); }
 
     /// <summary>采集超时时间 (ms)。</summary>
-    public int AcquisitionTimeoutMs { get; set; } = 3000;
+    private int _acquisitionTimeoutMs = 3000;
+    public int AcquisitionTimeoutMs { get => _acquisitionTimeoutMs; set => SetProperty(ref _acquisitionTimeoutMs, value); }
 
     /// <summary>重试次数。</summary>
-    public int RetryCount { get; set; } = 3;
+    private int _retryCount = 3;
+    public int RetryCount { get => _retryCount; set => SetProperty(ref _retryCount, value); }
 
     /// <summary>是否启用死区压缩。</summary>
-    public bool EnableDeadband { get; set; } = true;
+    private bool _enableDeadband = true;
+    public bool EnableDeadband { get => _enableDeadband; set => SetProperty(ref _enableDeadband, value); }
 
     private string _statusMessage = "就绪";
     /// <summary>操作状态消息。</summary>
@@ -72,12 +79,14 @@ public class SystemSettingsViewModel : BindableBase
         }
     }
 
-    public SystemSettingsViewModel(AlarmRuleConfigViewModel alarmRuleConfig, UserAccessManagementViewModel userAccessManagement, CalculationRuleManagementViewModel calculationRuleManagement, IAuthManager authManager)
+    public SystemSettingsViewModel(AlarmRuleConfigViewModel alarmRuleConfig, UserAccessManagementViewModel userAccessManagement, CalculationRuleManagementViewModel calculationRuleManagement, IAuthManager authManager, RuntimeSettingsService settingsService, SecurityAuditService auditService)
     {
         AlarmRuleConfig = alarmRuleConfig;
         UserAccessManagement = userAccessManagement;
         CalculationRuleManagement = calculationRuleManagement;
         _authManager = authManager;
+        _settingsService = settingsService;
+        _auditService = auditService;
         SaveCommand = new DelegateCommand(OnSave, () => CanModify);
         ResetCommand = new DelegateCommand(OnReset, () => CanModify);
         _authManager.CurrentUserChanged += (_, _) =>
@@ -98,16 +107,38 @@ public class SystemSettingsViewModel : BindableBase
         Categories.Add(new SettingsCategory("用户与权限", "账号、角色和访问状态", "🔐"));
 
         SelectedCategory = Categories[0];
+        LoadSettings(_settingsService.Current);
     }
 
-    private void OnSave()
+    private async void OnSave()
     {
-        StatusMessage = $"✓ 设置已保存 — {DateTime.Now:HH:mm:ss}";
+        try
+        {
+            var settings = BuildSettings();
+            await _settingsService.SaveAsync(settings);
+            await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "RuntimeSettingsChanged", "System/Settings", $"Timeout={settings.AcquisitionTimeoutMs};Retry={settings.RetryCount};Deadband={settings.EnableDeadband};Retention={settings.HistoryRetentionDays};Theme={settings.Theme}", true);
+            StatusMessage = $"✓ 设置已持久化；采集参数将在设备热重载后生效 — {DateTime.Now:HH:mm:ss}";
+        }
+        catch (Exception ex) { StatusMessage = "✗ 保存失败：" + ex.Message; }
     }
 
-    private void OnReset()
+    private async void OnReset()
     {
-        StatusMessage = $"↺ 设置已重置为默认值 — {DateTime.Now:HH:mm:ss}";
+        await _settingsService.ResetAsync();
+        LoadSettings(_settingsService.Current);
+        StatusMessage = $"↺ 设置已持久化重置为默认值 — {DateTime.Now:HH:mm:ss}";
+    }
+
+    private RuntimeSettings BuildSettings() => new()
+    {
+        AcquisitionTimeoutMs = AcquisitionTimeoutMs, RetryCount = RetryCount, EnableDeadband = EnableDeadband,
+        HistoryRetentionDays = HistoryRetentionDays, Theme = SelectedTheme, LogLevel = _settingsService.Current.LogLevel
+    };
+
+    private void LoadSettings(RuntimeSettings settings)
+    {
+        AcquisitionTimeoutMs = settings.AcquisitionTimeoutMs; RetryCount = settings.RetryCount;
+        EnableDeadband = settings.EnableDeadband; HistoryRetentionDays = settings.HistoryRetentionDays; SelectedTheme = settings.Theme;
     }
 
     private void ApplyTheme(string themeName)

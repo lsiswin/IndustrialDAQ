@@ -108,7 +108,7 @@
                                                Foreground="{StaticResource TextMutedBrush}"
                                                VerticalAlignment="Center" Margin="0,4"/>
                                     <TextBox Grid.Row="0" Grid.Column="1"
-                                             Text="{Binding DatabasePath}" Height="28" Margin="0,4"
+                                             Text="{Binding DatabasePath}" IsReadOnly="True" Height="28" Margin="0,4"
                                              Foreground="{StaticResource PanelBgBrush}"
                                              CaretBrush="{StaticResource TextPrimaryBrush}"/>
 

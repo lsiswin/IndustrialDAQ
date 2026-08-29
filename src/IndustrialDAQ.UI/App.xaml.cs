@@ -80,6 +80,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<IAuthManager, AuthManager>();
         containerRegistry.RegisterSingleton<SecurityAuditService>();
         containerRegistry.RegisterSingleton<PermissionManagementService>();
+        containerRegistry.RegisterSingleton<RuntimeSettingsService>();
 
         containerRegistry.RegisterSingleton<IAuthorizationRepository, AuthorizationRepository>();
         containerRegistry.RegisterSingleton<IAuthorizationService, AuthorizationService>();
@@ -600,7 +601,8 @@ public partial class App : PrismApplication
                     int startedCount = 0;
                     foreach (var filePath in jsonFiles)
                     {
-                        var deviceConfigs = await DeviceConfigurationLoader.LoadFromFileAsync(filePath);
+                        var settings = Container.Resolve<RuntimeSettingsService>();
+                        var deviceConfigs = (await DeviceConfigurationLoader.LoadFromFileAsync(filePath)).Select(settings.ApplyTo).ToList();
                         foreach (var config in deviceConfigs)
                         {
                             var readableTags = config.Tags.ToList();
@@ -793,7 +795,8 @@ public partial class App : PrismApplication
             {
                 try
                 {
-                    var configs = await DeviceConfigurationLoader.LoadFromFileAsync(file);
+                    var settings = Container.Resolve<RuntimeSettingsService>();
+                    var configs = (await DeviceConfigurationLoader.LoadFromFileAsync(file)).Select(settings.ApplyTo);
                     allNewConfigs.AddRange(configs);
                 }
                 catch (Exception ex)
