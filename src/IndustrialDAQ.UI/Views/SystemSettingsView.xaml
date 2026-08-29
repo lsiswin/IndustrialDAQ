@@ -4,11 +4,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:prism="http://prismlibrary.com/"
              xmlns:views="clr-namespace:IndustrialDAQ.UI.Views"
+             xmlns:converters="clr-namespace:IndustrialDAQ.UI.Converters"
              prism:ViewModelLocator.AutoWireViewModel="True"
              Background="{DynamicResource MainBgBrush}">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <converters:BooleanNegateConverter x:Key="BooleanNegate"/>
         <views:CategoryNameToVisibilityConverter x:Key="CategoryToVis"/>
     </UserControl.Resources>
 
@@ -91,7 +93,7 @@
                         <Border Style="{StaticResource CardBorderStyle}"
                                 Visibility="{Binding SelectedCategory.Name, Converter={StaticResource CategoryToVis}, ConverterParameter=存储管理}">
                             <StackPanel>
-                                <TextBlock Text="📁 数据库配置" FontSize="13" FontWeight="SemiBold"
+                                <TextBlock Text="📁 多数据库配置" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            Margin="0,0,0,8"/>
                                 <Grid>
@@ -102,15 +104,15 @@
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
 
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="数据库路径"
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="启动数据库"
                                                Foreground="{StaticResource TextMutedBrush}"
                                                VerticalAlignment="Center" Margin="0,4"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1"
-                                             Text="{Binding DatabasePath}" IsReadOnly="True" Height="28" Margin="0,4"
-                                             Foreground="{StaticResource PanelBgBrush}"
-                                             CaretBrush="{StaticResource TextPrimaryBrush}"/>
+                                    <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding DatabaseProfiles}"
+                                              SelectedItem="{Binding StartupDatabaseProfile}" DisplayMemberPath="Name"
+                                              Height="30" Margin="0,4"/>
 
                                     <TextBlock Grid.Row="1" Grid.Column="0"
                                                Text="数据保留天数"
@@ -120,7 +122,52 @@
                                              Text="{Binding HistoryRetentionDays}" Height="28" Margin="0,4"
                                              Foreground="{StaticResource PanelBgBrush}"
                                              CaretBrush="{StaticResource TextPrimaryBrush}"/>
+
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="当前连接"
+                                               Foreground="{StaticResource TextMutedBrush}"
+                                               VerticalAlignment="Center" Margin="0,4"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DatabasePath}"
+                                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6"
+                                               TextWrapping="Wrap"/>
                                 </Grid>
+
+                                <DataGrid ItemsSource="{Binding DatabaseProfiles}" SelectedItem="{Binding SelectedDatabaseProfile}"
+                                          AutoGenerateColumns="False" CanUserAddRows="False" Height="220" Margin="0,10,0,6"
+                                          IsReadOnly="{Binding CanModify, Converter={StaticResource BooleanNegate}}"
+                                          HeadersVisibility="Column" SelectionMode="Single">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="名称" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="130"/>
+                                        <DataGridTemplateColumn Header="类型" Width="100">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Provider}" VerticalAlignment="Center"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                            <DataGridTemplateColumn.CellEditingTemplate>
+                                                <DataTemplate>
+                                                    <ComboBox SelectedItem="{Binding Provider, UpdateSourceTrigger=PropertyChanged}"
+                                                              ItemsSource="{Binding DataContext.AvailableDatabaseProviders, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellEditingTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="主机/SQLite 路径" Binding="{Binding Host, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
+                                        <DataGridTextColumn Header="端口" Binding="{Binding Port, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
+                                        <DataGridTextColumn Header="数据库" Binding="{Binding Database, UpdateSourceTrigger=PropertyChanged}" Width="120"/>
+                                        <DataGridTextColumn Header="用户名" Binding="{Binding Username, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
+                                        <DataGridTextColumn Header="密码环境变量" Binding="{Binding PasswordEnvironmentVariable, UpdateSourceTrigger=PropertyChanged}" Width="190"/>
+                                        <DataGridTextColumn Header="SQLite 路径" Binding="{Binding SqlitePath, UpdateSourceTrigger=PropertyChanged}" Width="220"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+
+                                <StackPanel Orientation="Horizontal" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}">
+                                    <Button Content="＋ 添加 PostgreSQL" Command="{Binding AddDatabaseCommand}" Padding="12,6" Margin="0,0,8,0"/>
+                                    <Button Content="删除" Command="{Binding RemoveDatabaseCommand}" Padding="12,6" Margin="0,0,8,0"/>
+                                    <Button Content="测试连接" Command="{Binding TestDatabaseCommand}" Padding="12,6"/>
+                                </StackPanel>
+                                <TextBlock Text="{Binding DatabaseStatus}" Foreground="{StaticResource TextDimBrush}"
+                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <TextBlock Text="密码不会写入配置；请填写保存密码的环境变量名称。保存并重启客户端后切换数据库。"
+                                           Foreground="{StaticResource TextDimBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
 

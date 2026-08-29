@@ -1,6 +1,7 @@
 // File: SystemSettingsViewModel.cs  Module: UI (ViewModels)  Author: IndustrialDAQ Team
 using System.Collections.ObjectModel;
 using IndustrialDAQ.Core.Models;
+using IndustrialDAQ.Infrastructure;
 using Prism.Commands;
 using Prism.Mvvm;
 using System.Windows;
@@ -41,8 +42,39 @@ public class SystemSettingsViewModel : BindableBase
     /// <summary>重置设置命令。</summary>
     public DelegateCommand ResetCommand { get; }
 
-    /// <summary>数据库路径。</summary>
-    public string DatabasePath { get; } = Path.Combine(AppContext.BaseDirectory, "industrialdaq.db");
+    public ObservableCollection<DatabaseProfileEditor> DatabaseProfiles { get; } = new();
+    public ObservableCollection<string> AvailableDatabaseProviders { get; } = new() { "SQLite", "PostgreSQL" };
+    public DelegateCommand AddDatabaseCommand { get; }
+    public DelegateCommand RemoveDatabaseCommand { get; }
+    public DelegateCommand TestDatabaseCommand { get; }
+
+    private DatabaseProfileEditor? _selectedDatabaseProfile;
+    public DatabaseProfileEditor? SelectedDatabaseProfile
+    {
+        get => _selectedDatabaseProfile;
+        set
+        {
+            if (SetProperty(ref _selectedDatabaseProfile, value))
+            {
+                RaisePropertyChanged(nameof(DatabasePath));
+                RemoveDatabaseCommand.RaiseCanExecuteChanged();
+                TestDatabaseCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    private DatabaseProfileEditor? _startupDatabaseProfile;
+    public DatabaseProfileEditor? StartupDatabaseProfile
+    {
+        get => _startupDatabaseProfile;
+        set => SetProperty(ref _startupDatabaseProfile, value);
+    }
+
+    /// <summary>当前选中数据库的安全连接摘要，不显示密码。</summary>
+    public string DatabasePath => SelectedDatabaseProfile is null ? "未选择" : DatabaseProfileConnection.Describe(SelectedDatabaseProfile.ToProfile());
+
+    private string _databaseStatus = "数据库切换将在下次启动时生效";
+    public string DatabaseStatus { get => _databaseStatus; set => SetProperty(ref _databaseStatus, value); }
 
     /// <summary>历史数据保留天数。</summary>
     private int _historyRetentionDays = 90;
@@ -94,11 +126,17 @@ public class SystemSettingsViewModel : BindableBase
         _auditService = auditService;
         SaveCommand = new DelegateCommand(OnSave, () => CanModify);
         ResetCommand = new DelegateCommand(OnReset, () => CanModify);
+        AddDatabaseCommand = new DelegateCommand(AddDatabase, () => CanModify);
+        RemoveDatabaseCommand = new DelegateCommand(RemoveDatabase, () => CanModify && SelectedDatabaseProfile is not null && DatabaseProfiles.Count > 1);
+        TestDatabaseCommand = new DelegateCommand(TestDatabase, () => CanModify && SelectedDatabaseProfile is not null);
         _authManager.CurrentUserChanged += (_, _) =>
         {
             RaisePropertyChanged(nameof(CanModify));
             SaveCommand.RaiseCanExecuteChanged();
             ResetCommand.RaiseCanExecuteChanged();
+            AddDatabaseCommand.RaiseCanExecuteChanged();
+            RemoveDatabaseCommand.RaiseCanExecuteChanged();
+            TestDatabaseCommand.RaiseCanExecuteChanged();
         };
 
         // 初始化设置分类
@@ -137,13 +175,61 @@ public class SystemSettingsViewModel : BindableBase
     private RuntimeSettings BuildSettings() => new()
     {
         AcquisitionTimeoutMs = AcquisitionTimeoutMs, RetryCount = RetryCount, EnableDeadband = EnableDeadband,
-        HistoryRetentionDays = HistoryRetentionDays, Theme = SelectedTheme, LogLevel = SelectedLogLevel
+        HistoryRetentionDays = HistoryRetentionDays, Theme = SelectedTheme, LogLevel = SelectedLogLevel,
+        ActiveDatabaseProfileId = StartupDatabaseProfile?.Id ?? DatabaseProfiles.First().Id,
+        DatabaseProfiles = DatabaseProfiles.Select(editor => editor.ToProfile()).ToArray()
     };
 
     private void LoadSettings(RuntimeSettings settings)
     {
         AcquisitionTimeoutMs = settings.AcquisitionTimeoutMs; RetryCount = settings.RetryCount;
         EnableDeadband = settings.EnableDeadband; HistoryRetentionDays = settings.HistoryRetentionDays; SelectedTheme = settings.Theme; SelectedLogLevel = settings.LogLevel;
+        DatabaseProfiles.Clear();
+        foreach (var profile in settings.DatabaseProfiles) DatabaseProfiles.Add(new DatabaseProfileEditor(profile));
+        StartupDatabaseProfile = DatabaseProfiles.FirstOrDefault(profile => profile.Id == settings.ActiveDatabaseProfileId) ?? DatabaseProfiles.First();
+        SelectedDatabaseProfile = StartupDatabaseProfile;
+        RemoveDatabaseCommand.RaiseCanExecuteChanged();
+    }
+
+    private void AddDatabase()
+    {
+        var editor = new DatabaseProfileEditor(new DatabaseProfile
+        {
+            Name = $"PostgreSQL {DatabaseProfiles.Count}",
+            Provider = "PostgreSQL",
+            PasswordEnvironmentVariable = "INDUSTRIALDAQ_POSTGRES_PASSWORD"
+        });
+        DatabaseProfiles.Add(editor);
+        SelectedDatabaseProfile = editor;
+        DatabaseStatus = "已添加数据库配置，请填写参数并测试连接";
+    }
+
+    private void RemoveDatabase()
+    {
+        if (SelectedDatabaseProfile is null || DatabaseProfiles.Count <= 1) return;
+        var removed = SelectedDatabaseProfile;
+        DatabaseProfiles.Remove(removed);
+        if (ReferenceEquals(StartupDatabaseProfile, removed)) StartupDatabaseProfile = DatabaseProfiles.First();
+        SelectedDatabaseProfile = DatabaseProfiles.FirstOrDefault();
+        DatabaseStatus = "数据库配置已从编辑列表移除，保存后生效";
+    }
+
+    private async void TestDatabase()
+    {
+        if (SelectedDatabaseProfile is null) return;
+        var profile = SelectedDatabaseProfile.ToProfile();
+        try
+        {
+            DatabaseStatus = $"正在测试 {profile.Name}...";
+            await DatabaseProfileConnection.TestAsync(profile);
+            DatabaseStatus = $"✓ {profile.Name} 连接成功";
+            await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "DatabaseConnectionTest", "System/Settings/Storage", DatabaseProfileConnection.Describe(profile), true);
+        }
+        catch (Exception ex)
+        {
+            DatabaseStatus = $"✗ {profile.Name} 连接失败：{ex.Message}";
+            await _auditService.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username, "DatabaseConnectionTest", "System/Settings/Storage", DatabaseProfileConnection.Describe(profile), false);
+        }
     }
 
     private void ApplyTheme(string themeName)
@@ -175,6 +261,42 @@ public class SystemSettingsViewModel : BindableBase
             StatusMessage = $"✗ 主题切换失败: {ex.Message}";
         }
     }
+}
+
+/// <summary>数据库档案的可编辑 UI 模型，转换后再进入持久化设置。</summary>
+public sealed class DatabaseProfileEditor : BindableBase
+{
+    public string Id { get; }
+    private string _name;
+    private string _provider;
+    private string _sqlitePath;
+    private string _host;
+    private int _port;
+    private string _database;
+    private string _username;
+    private string _passwordEnvironmentVariable;
+
+    public string Name { get => _name; set => SetProperty(ref _name, value); }
+    public string Provider { get => _provider; set => SetProperty(ref _provider, value); }
+    public string SqlitePath { get => _sqlitePath; set => SetProperty(ref _sqlitePath, value); }
+    public string Host { get => _host; set => SetProperty(ref _host, value); }
+    public int Port { get => _port; set => SetProperty(ref _port, value); }
+    public string Database { get => _database; set => SetProperty(ref _database, value); }
+    public string Username { get => _username; set => SetProperty(ref _username, value); }
+    public string PasswordEnvironmentVariable { get => _passwordEnvironmentVariable; set => SetProperty(ref _passwordEnvironmentVariable, value); }
+
+    public DatabaseProfileEditor(DatabaseProfile profile)
+    {
+        Id = profile.Id; _name = profile.Name; _provider = profile.Provider; _sqlitePath = profile.SqlitePath;
+        _host = profile.Host; _port = profile.Port; _database = profile.Database; _username = profile.Username;
+        _passwordEnvironmentVariable = profile.PasswordEnvironmentVariable;
+    }
+
+    public DatabaseProfile ToProfile() => new()
+    {
+        Id = Id, Name = Name.Trim(), Provider = Provider, SqlitePath = SqlitePath.Trim(), Host = Host.Trim(), Port = Port,
+        Database = Database.Trim(), Username = Username.Trim(), PasswordEnvironmentVariable = PasswordEnvironmentVariable.Trim()
+    };
 }
 
 /// <summary>

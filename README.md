@@ -108,6 +108,8 @@ dotnet run --project src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj
 
 SQLite 数据库固定保存在客户端程序目录，避免因 IDE、终端或快捷方式的启动目录不同而创建多份数据库。
 
+客户端可在“系统设置 → 存储管理”维护多个 SQLite/PostgreSQL 连接档案、测试连接并选择下次启动使用的数据库。数据库密码不会写入 JSON，只保存环境变量名称；保存配置后需重启客户端完成切换。`INDUSTRIALDAQ_STORAGE_PROVIDER` 与 `INDUSTRIALDAQ_POSTGRES_CONNECTION` 仍作为部署环境的最高优先级覆盖项。
+
 首次初始化会创建管理员账号。部署到正式现场前，应立即修改初始密码并根据产线、设备和数据点配置最小权限策略。
 
 ### 可选运行环境变量
@@ -125,6 +127,8 @@ $env:MY_OPCUA_PASSWORD = "..."
 $env:MY_MQTT_PASSWORD = "..."
 ```
 
+MQTT 驱动将数据点 `Address` 作为主题：读取时订阅主题并缓存最新值，写入时向主题发布值。本机联调可安装 Mosquitto，并确认 Windows 服务 `mosquitto` 正在监听 `1883` 端口。
+
 ## 配置说明
 
 - `config/production-line.json`：产线、设备、驱动和数据点定义。
@@ -139,7 +143,7 @@ $env:MY_MQTT_PASSWORD = "..."
 dotnet build src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj --no-restore
 ```
 
-自动化测试项目位于 `tests/IndustrialDAQ.Tests`。当前覆盖权限继承与拒绝、报警事件广播、计算引擎、计算规则仓储以及历史值类型恢复。
+自动化测试项目位于 `tests/IndustrialDAQ.Tests`。当前覆盖权限继承与拒绝、报警事件广播、计算引擎、计算规则仓储、历史值类型恢复以及数据库连接档案。
 
 ## 开发原则
 

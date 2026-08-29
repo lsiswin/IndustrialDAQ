@@ -71,6 +71,15 @@ public sealed class RuntimeSettingsService
         if (settings.RetryCount is < 0 or > 20) throw new InvalidOperationException("重试次数必须在 0~20 之间。");
         if (settings.HistoryRetentionDays is < 1 or > 3650) throw new InvalidOperationException("历史保留天数必须在 1~3650 之间。");
         if (settings.Theme is not ("DarkTheme" or "LightTheme")) throw new InvalidOperationException("主题配置无效。");
+        if (settings.DatabaseProfiles is null || settings.DatabaseProfiles.Count == 0) throw new InvalidOperationException("至少需要保留一个数据库配置。");
+        if (settings.DatabaseProfiles.Any(profile => string.IsNullOrWhiteSpace(profile.Id) || string.IsNullOrWhiteSpace(profile.Name)))
+            throw new InvalidOperationException("数据库配置名称和标识不能为空。");
+        if (settings.DatabaseProfiles.Select(profile => profile.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != settings.DatabaseProfiles.Count)
+            throw new InvalidOperationException("数据库配置标识不能重复。");
+        if (!settings.DatabaseProfiles.Any(profile => string.Equals(profile.Id, settings.ActiveDatabaseProfileId, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("当前启动数据库配置不存在。");
+        if (settings.DatabaseProfiles.Any(profile => profile.Provider is not ("SQLite" or "PostgreSQL")))
+            throw new InvalidOperationException("仅支持 SQLite 或 PostgreSQL 数据库。");
     }
 }
 
@@ -82,4 +91,6 @@ public sealed record RuntimeSettings
     public int HistoryRetentionDays { get; init; } = 90;
     public string Theme { get; init; } = "DarkTheme";
     public string LogLevel { get; init; } = "Information";
+    public string ActiveDatabaseProfileId { get; init; } = "sqlite-default";
+    public IReadOnlyList<DatabaseProfile> DatabaseProfiles { get; init; } = [DatabaseProfile.CreateDefaultSqlite()];
 }

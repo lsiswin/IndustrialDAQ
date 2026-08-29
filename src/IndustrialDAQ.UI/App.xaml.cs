@@ -252,7 +252,7 @@ public partial class App : PrismApplication
         regionManager.RequestNavigate("MainRegion", nameof(DashboardView));
     }
 
-    private static void ConfigureDatabase(DbContextOptionsBuilder options)
+    private void ConfigureDatabase(DbContextOptionsBuilder options)
     {
         var provider = Environment.GetEnvironmentVariable("INDUSTRIALDAQ_STORAGE_PROVIDER")?.Trim();
         if (string.Equals(provider, "PostgreSQL", StringComparison.OrdinalIgnoreCase) || string.Equals(provider, "Npgsql", StringComparison.OrdinalIgnoreCase))
@@ -264,9 +264,11 @@ public partial class App : PrismApplication
             return;
         }
 
-        // SQLite 数据库固定到程序目录，避免不同启动目录生成多份数据库。
-        var databasePath = Path.Combine(AppContext.BaseDirectory, "industrialdaq.db");
-        options.UseSqlite($"Data Source={databasePath}");
+        var settings = (_runtimeSettingsService ??= new RuntimeSettingsService()).Current;
+        var profile = settings.DatabaseProfiles.FirstOrDefault(item =>
+            string.Equals(item.Id, settings.ActiveDatabaseProfileId, StringComparison.OrdinalIgnoreCase))
+            ?? settings.DatabaseProfiles.First();
+        DatabaseProfileConnection.Configure(options, profile);
     }
 
     private async Task LoadCalculationRulesAsync(DataProcessor processor)
