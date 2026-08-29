@@ -180,6 +180,7 @@ public class DashboardViewModel : BindableBase, IDestructible
         AddStation(new StationModel
         {
             StationId = "line",
+            Icon = "🏭",
             Name = "生产线",
             Status = StationStatus.NotStarted,
             PrimaryStatName = "模式",
@@ -190,6 +191,7 @@ public class DashboardViewModel : BindableBase, IDestructible
         AddStation(new StationModel
         {
             StationId = "conveyor",
+            Icon = "➡",
             Name = "传送带",
             Status = StationStatus.NotStarted,
             PrimaryStatName = "速度",
@@ -200,6 +202,7 @@ public class DashboardViewModel : BindableBase, IDestructible
         AddStation(new StationModel
         {
             StationId = "filling",
+            Icon = "💧",
             Name = "灌装站",
             Status = StationStatus.NotStarted,
             PrimaryStatName = "液位",
@@ -210,6 +213,7 @@ public class DashboardViewModel : BindableBase, IDestructible
         AddStation(new StationModel
         {
             StationId = "counter",
+            Icon = "∑",
             Name = "产量计数",
             Status = StationStatus.NotStarted,
             PrimaryStatName = "产量",

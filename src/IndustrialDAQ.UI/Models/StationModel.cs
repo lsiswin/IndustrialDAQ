@@ -25,6 +25,8 @@ public enum StationStatus
 /// </summary>
 public class StationModel : BindableBase
 {
+    /// <summary>工位语义图标，不再由界面统一显示齿轮占位。</summary>
+    public string Icon { get; init; } = "⚙";
     private string _stationId = string.Empty;
     public string StationId
     {

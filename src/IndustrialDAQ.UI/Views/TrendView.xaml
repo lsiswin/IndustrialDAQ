@@ -147,7 +147,9 @@
                     <Button Content="近4小时" Command="{Binding SetLast4HourCommand}"
                             Padding="8,5" Margin="0,0,4,0"/>
                     <Button Content="近24小时" Command="{Binding SetLast24HourCommand}"
-                            Padding="8,5"/>
+                            Padding="8,5" Margin="0,0,4,0"/>
+                    <Button Content="导出 CSV" Command="{Binding ExportHistoryCommand}" Padding="10,5"
+                            Background="{DynamicResource SuccessBrush}" Foreground="White" BorderThickness="0"/>
                 </StackPanel>
             </Grid>
         </Border>

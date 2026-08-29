@@ -65,8 +65,7 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock Text="生成设备配置" FontSize="16" FontWeight="Bold"
-                       Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,16"/>
+            <Grid><TextBlock Text="生成设备配置" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,16"/><Button Content="✕" Command="{Binding CancelCommand}" Width="30" Height="30" Padding="0" Margin="0" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent" ToolTip="关闭"/></Grid>
 
             <!-- 设备名称 -->
             <TextBlock Grid.Row="1" Text="设备名称" Margin="0,0,0,4"/>

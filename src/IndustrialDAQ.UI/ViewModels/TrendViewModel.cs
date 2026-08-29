@@ -18,6 +18,9 @@ using Prism.Commands;
 using Prism.Mvvm;
 using Prism.Navigation;
 using SkiaSharp;
+using Microsoft.Win32;
+using System.Text;
+using System.IO;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
@@ -161,6 +164,7 @@ public class TrendViewModel : BindableBase, IDestructible
     public DelegateCommand SetLastHourCommand { get; }
     public DelegateCommand SetLast4HourCommand { get; }
     public DelegateCommand SetLast24HourCommand { get; }
+    public DelegateCommand ExportHistoryCommand { get; }
 
     // 内部 Series 映射
     private readonly Dictionary<string, LineSeries<ObservablePoint>> _seriesMap = [];
@@ -276,6 +280,7 @@ public class TrendViewModel : BindableBase, IDestructible
         });
 
         QueryHistoryCommand = new DelegateCommand(async () => await QueryHistoryAsync());
+        ExportHistoryCommand = new DelegateCommand(async () => await ExportHistoryAsync());
 
         SetLast15MinCommand = new DelegateCommand(() =>
         {
@@ -316,6 +321,32 @@ public class TrendViewModel : BindableBase, IDestructible
         // 加载可用 Tag
         LoadAvailableTags();
     }
+
+    private async Task ExportHistoryAsync()
+    {
+        var selectedIds = AvailableTags.Where(tag => tag.IsSelected).Select(tag => tag.TagId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (selectedIds.Count == 0) { StatusText = "请先选择需要导出的数据点"; return; }
+        var dialog = new SaveFileDialog { Filter = "CSV 文件 (*.csv)|*.csv", FileName = $"IndustrialDAQ-History-{DateTime.Now:yyyyMMdd-HHmmss}.csv", AddExtension = true };
+        if (dialog.ShowDialog() != true) return;
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var rows = await db.HistoricalRecords.AsNoTracking().Where(row => selectedIds.Contains(row.TagId)).OrderBy(row => row.Timestamp).ToListAsync();
+        var startUtc = HistoryStart.ToUniversalTime();
+        var endUtc = HistoryEnd.ToUniversalTime();
+        var builder = new StringBuilder("TagId,TagName,Timestamp,Value,ValueType,QualityCode\r\n");
+        var count = 0;
+        foreach (var row in rows)
+        {
+            if (!DateTimeOffset.TryParse(row.Timestamp, out var timestamp) || timestamp < startUtc || timestamp > endUtc) continue;
+            builder.Append(Csv(row.TagId)).Append(',').Append(Csv(row.TagName)).Append(',').Append(Csv(timestamp.ToLocalTime().ToString("O"))).Append(',')
+                .Append(Csv(row.Value)).Append(',').Append(Csv(row.ValueType)).Append(',').Append(row.QualityCode).Append("\r\n");
+            count++;
+        }
+        await File.WriteAllTextAsync(dialog.FileName, builder.ToString(), new UTF8Encoding(true));
+        StatusText = $"已导出 {count} 条历史数据：{dialog.FileName}";
+    }
+
+    private static string Csv(string? value) => '"' + (value ?? string.Empty).Replace("\"", "\"\"") + '"';
 
     /// <inheritdoc />
     public void Destroy()
