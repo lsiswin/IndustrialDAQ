@@ -177,8 +177,8 @@
                                 <TextBlock Text="📡 通信参数" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            Margin="0,0,0,8"/>
-                                <TextBlock Text="（Modbus / OPC UA / MQTT 参数配置将在后续版本中提供）"
-                                           FontSize="12" Foreground="{StaticResource TextDimBrush}"/>
+                                <TextBlock Text="设备级 Modbus / OPC UA / MQTT 参数由设备配置 JSON 热加载；凭据仅通过环境变量注入。" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource TextDimBrush}"/>
+                                <TextBlock Text="{Binding NotificationConfiguration, StringFormat=报警外部通知：{0}}" Margin="0,10,0,0" Foreground="{DynamicResource TextSecondaryBrush}"/>
                             </StackPanel>
                         </Border>
 
@@ -196,8 +196,8 @@
                                 <TextBlock Text="📋 日志设置" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{StaticResource TextSecondaryBrush}"
                                            Margin="0,0,0,8"/>
-                                <TextBlock Text="（Serilog 日志级别和输出目标配置将在后续版本中提供）"
-                                           FontSize="12" Foreground="{StaticResource TextDimBrush}"/>
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="运行日志级别" Width="120"/><ComboBox ItemsSource="{Binding AvailableLogLevels}" SelectedItem="{Binding SelectedLogLevel}" Width="180"/></StackPanel>
+                                <TextBlock Text="保存后立即调整 Serilog 最低输出级别。" Margin="0,8,0,0" FontSize="12" Foreground="{StaticResource TextDimBrush}"/>
                             </StackPanel>
                         </Border>
 

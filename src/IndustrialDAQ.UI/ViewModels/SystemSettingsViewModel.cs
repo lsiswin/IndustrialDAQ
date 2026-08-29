@@ -65,6 +65,11 @@ public class SystemSettingsViewModel : BindableBase
     public string StatusMessage { get => _statusMessage; set => SetProperty(ref _statusMessage, value); }
 
     public ObservableCollection<string> AvailableThemes { get; } = new() { "DarkTheme", "LightTheme" };
+    public ObservableCollection<string> AvailableLogLevels { get; } = new() { "Debug", "Information", "Warning", "Error" };
+    private string _selectedLogLevel = "Information";
+    public string SelectedLogLevel { get => _selectedLogLevel; set => SetProperty(ref _selectedLogLevel, value); }
+    public string StorageProvider => Environment.GetEnvironmentVariable("INDUSTRIALDAQ_STORAGE_PROVIDER") ?? "SQLite";
+    public string NotificationConfiguration => string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("INDUSTRIALDAQ_ALARM_WEBHOOKS")) ? "未配置 INDUSTRIALDAQ_ALARM_WEBHOOKS" : "Webhook 外部通知已启用";
 
     private string _selectedTheme = "DarkTheme";
     public string SelectedTheme
@@ -132,13 +137,13 @@ public class SystemSettingsViewModel : BindableBase
     private RuntimeSettings BuildSettings() => new()
     {
         AcquisitionTimeoutMs = AcquisitionTimeoutMs, RetryCount = RetryCount, EnableDeadband = EnableDeadband,
-        HistoryRetentionDays = HistoryRetentionDays, Theme = SelectedTheme, LogLevel = _settingsService.Current.LogLevel
+        HistoryRetentionDays = HistoryRetentionDays, Theme = SelectedTheme, LogLevel = SelectedLogLevel
     };
 
     private void LoadSettings(RuntimeSettings settings)
     {
         AcquisitionTimeoutMs = settings.AcquisitionTimeoutMs; RetryCount = settings.RetryCount;
-        EnableDeadband = settings.EnableDeadband; HistoryRetentionDays = settings.HistoryRetentionDays; SelectedTheme = settings.Theme;
+        EnableDeadband = settings.EnableDeadband; HistoryRetentionDays = settings.HistoryRetentionDays; SelectedTheme = settings.Theme; SelectedLogLevel = settings.LogLevel;
     }
 
     private void ApplyTheme(string themeName)

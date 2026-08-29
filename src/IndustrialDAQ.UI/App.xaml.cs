@@ -32,6 +32,7 @@ using Prism.Ioc;
 using Prism.Navigation.Regions;
 using Serilog;
 using Serilog.Events;
+using Serilog.Core;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -43,6 +44,8 @@ public partial class App : PrismApplication
 {
     private FileSystemWatcher? _configWatcher;
     private CancellationTokenSource? _debounceCts;
+    private RuntimeSettingsService? _runtimeSettingsService;
+    private LoggingLevelSwitch? _loggingLevelSwitch;
     protected override Window CreateShell()
     {
         return Container.Resolve<MainWindow>();
@@ -81,7 +84,8 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<IAuthManager, AuthManager>();
         containerRegistry.RegisterSingleton<SecurityAuditService>();
         containerRegistry.RegisterSingleton<PermissionManagementService>();
-        containerRegistry.RegisterSingleton<RuntimeSettingsService>();
+        containerRegistry.RegisterInstance(_runtimeSettingsService ??= new RuntimeSettingsService());
+        containerRegistry.RegisterInstance(_loggingLevelSwitch ??= new LoggingLevelSwitch(LogEventLevel.Information));
         containerRegistry.RegisterSingleton<HistoricalDataRetentionService>();
         containerRegistry.RegisterSingleton<RuntimeConfigurationHotReloadService>();
 
@@ -128,8 +132,12 @@ public partial class App : PrismApplication
         var extension = new DryIocContainerExtension();
         var services = new ServiceCollection();
 
+        _runtimeSettingsService ??= new RuntimeSettingsService();
+        _loggingLevelSwitch = new LoggingLevelSwitch(ParseLogLevel(_runtimeSettingsService.Current.LogLevel));
+        _runtimeSettingsService.Changed += (_, settings) => _loggingLevelSwitch.MinimumLevel = ParseLogLevel(settings.LogLevel);
+
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Information()  // 全局 Information
+            .MinimumLevel.ControlledBy(_loggingLevelSwitch)
             .MinimumLevel.Override("IndustrialDAQ", LogEventLevel.Debug)  // 项目代码保持 Debug
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
@@ -150,6 +158,9 @@ public partial class App : PrismApplication
 
         return extension;
     }
+
+    private static LogEventLevel ParseLogLevel(string? value) =>
+        Enum.TryParse<LogEventLevel>(value, true, out var level) ? level : LogEventLevel.Information;
 
     protected override void OnInitialized()
     {

@@ -10,6 +10,7 @@ public sealed class RuntimeSettingsService
     private static readonly JsonSerializerOptions Options = new() { WriteIndented = true };
     private readonly string _filePath;
     public RuntimeSettings Current { get; private set; }
+    public event EventHandler<RuntimeSettings>? Changed;
 
     public RuntimeSettingsService()
     {
@@ -26,6 +27,7 @@ public sealed class RuntimeSettingsService
         await File.WriteAllTextAsync(temporaryPath, JsonSerializer.Serialize(settings, Options), cancellationToken);
         File.Move(temporaryPath, _filePath, true);
         Current = settings;
+        Changed?.Invoke(this, settings);
     }
 
     public async Task ResetAsync(CancellationToken cancellationToken = default) => await SaveAsync(new RuntimeSettings(), cancellationToken);
