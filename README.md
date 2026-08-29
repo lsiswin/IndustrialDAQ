@@ -4,13 +4,16 @@ IndustrialDAQ 是一个基于 .NET 8、WPF 和 Prism 构建的工业数据采集
 
 ## 核心能力
 
-- **多协议采集**：采用插件式驱动架构，已包含 Modbus TCP、OPC UA 和 S7 驱动模块。
+- **多协议采集**：采用插件式驱动架构，已包含 Modbus TCP、OPC UA、S7 和 MQTT 驱动模块。
 - **配置驱动**：设备、数据点和驱动参数由 JSON 配置加载，支持运行时热更新。
 - **资源树模型**：将设备配置同步为 `Devices/{设备}/{数据点}` 层级资源，统一供趋势、报警、写入和权限模块使用。
 - **实时与历史趋势**：支持按设备复选数值型数据点、实时滚动、历史区间查询、十字线悬浮和报警点标识。
 - **规则与报警**：规则定义支持动态加载，报警状态机负责触发、恢复、确认和历史记录。
 - **用户与权限**：账号、角色和关联关系独立持久化，按 `ResourcePath + Action` 执行动态授权。
 - **安全审计**：记录登录、登录失败、退出、权限变更、授权拒绝及数据点写入结果。
+- **数据加工**：计算规则持久化后热加载，支持表达式计算和虚拟数据点输出。
+- **可靠存储**：支持 SQLite/PostgreSQL、历史保留清理、类型恢复、写入重试及死信回放。
+- **外部通知**：报警中心支持钉钉/企业微信兼容文本 Webhook 适配器。
 - **主题与响应式布局**：提供深色/浅色主题，并针对不同窗口尺寸调整首页卡片和业务页面布局。
 
 ## 权限模型
@@ -44,7 +47,7 @@ Deny 优先 → 路径深度 → Priority
 
 - .NET 8 / WPF
 - Prism MVVM、DI、EventAggregator、DialogService
-- Entity Framework Core / SQLite
+- Entity Framework Core / SQLite / PostgreSQL
 - LiveChartsCore.SkiaSharpView.WPF
 - Serilog
 - NModbus、OPC UA、S7
@@ -65,6 +68,7 @@ src/
 Plugins/
 ├── Drivers.Modbus
 ├── Drivers.OpcUA
+├── Drivers.Mqtt
 └── Drivers.S7
 
 config/                            设备配置与 Modbus 模拟脚本
@@ -106,11 +110,27 @@ SQLite 数据库固定保存在客户端程序目录，避免因 IDE、终端或
 
 首次初始化会创建管理员账号。部署到正式现场前，应立即修改初始密码并根据产线、设备和数据点配置最小权限策略。
 
+### 可选运行环境变量
+
+```powershell
+# PostgreSQL（默认仍为 SQLite）
+$env:INDUSTRIALDAQ_STORAGE_PROVIDER = "PostgreSQL"
+$env:INDUSTRIALDAQ_POSTGRES_CONNECTION = "Host=localhost;Database=industrialdaq;Username=daq;Password=..."
+
+# 多个报警机器人地址使用分号分隔
+$env:INDUSTRIALDAQ_ALARM_WEBHOOKS = "https://example/webhook-a;https://example/webhook-b"
+
+# OPC UA / MQTT 密码使用设备 JSON 中配置的环境变量名称读取
+$env:MY_OPCUA_PASSWORD = "..."
+$env:MY_MQTT_PASSWORD = "..."
+```
+
 ## 配置说明
 
 - `config/production-line.json`：产线、设备、驱动和数据点定义。
 - `config/python_modbus_slave.py`：Modbus TCP 模拟设备。
 - 数据点必须通过资源树同步后，才能被规则、趋势和动态权限统一引用。
+- `alarm-definitions.json`、`permission-policies.json`、`calculation-rules.json` 支持文件变更热加载。
 - 业务代码不得写死设备、数据点、菜单权限或报警判断条件。
 
 ## 验证
@@ -119,7 +139,7 @@ SQLite 数据库固定保存在客户端程序目录，避免因 IDE、终端或
 dotnet build src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj --no-restore
 ```
 
-当前权限集成测试覆盖：父路径继承、拒绝优先、默认拒绝、审计持久化、审计查询顺序以及管理员认证。
+自动化测试项目位于 `tests/IndustrialDAQ.Tests`。当前覆盖权限继承与拒绝、报警事件广播、计算引擎、计算规则仓储以及历史值类型恢复。
 
 ## 开发原则
 
