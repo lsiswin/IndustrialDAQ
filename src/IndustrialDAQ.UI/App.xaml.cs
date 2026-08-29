@@ -6,6 +6,7 @@ using IndustrialDAQ.Alarm.Center;
 using IndustrialDAQ.Alarm.RuleBuilder;
 using IndustrialDAQ.Alarm.RuleEngine;
 using IndustrialDAQ.Alarm.StateMachine;
+using IndustrialDAQ.Alarm.Notifications;
 using IndustrialDAQ.Core;
 using IndustrialDAQ.Core.Authorization;
 using IndustrialDAQ.Core.Configuration;
@@ -96,6 +97,8 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<IAlarmStateMachineService, AlarmStateMachineService>();
         containerRegistry.RegisterSingleton<IAlarmCenterEventBus, AlarmCenterEventBus>();
         containerRegistry.RegisterSingleton<IAlarmCenter, AlarmCenter>();
+        containerRegistry.RegisterSingleton<WebhookAlarmNotificationAdapter>();
+        containerRegistry.RegisterSingleton<AlarmNotificationDispatcher>();
 
         // ViewModel 注册（支持构造函数注入）
         containerRegistry.Register<AlarmRecordViewModel>();
@@ -212,10 +215,12 @@ public partial class App : PrismApplication
         var ruleEngineService = Container.Resolve<IRuleEngineService>();
         var alarmStateMachineService = Container.Resolve<IAlarmStateMachineService>();
         var alarmCenter = Container.Resolve<IAlarmCenter>();
+        var notificationDispatcher = Container.Resolve<AlarmNotificationDispatcher>();
         _ = alarmManager.StartAsync(CancellationToken.None);
         _ = ruleEngineService.StartAsync(CancellationToken.None);
         _ = alarmStateMachineService.StartAsync(CancellationToken.None);
         _ = alarmCenter.StartAsync(CancellationToken.None);
+        _ = notificationDispatcher.StartAsync(CancellationToken.None);
 
         // ── 启动趋势引擎 ──
         var trendEngine = Container.Resolve<TrendEngine>();
