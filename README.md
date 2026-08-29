@@ -96,7 +96,7 @@ python config/python_modbus_slave.py
 ### 编译客户端
 
 ```powershell
-dotnet restore IndustrialDAQ.sln
+dotnet restore Projects.sln
 dotnet build src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj
 ```
 
