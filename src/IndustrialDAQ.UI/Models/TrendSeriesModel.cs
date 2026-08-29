@@ -63,6 +63,12 @@ public class TrendTagItem : BindableBase
 /// </summary>
 public class TrendDeviceItem : BindableBase
 {
+    public TrendDeviceItem()
+    {
+        // 数据点热加入或移除时同步更新设备后面的数量文本。
+        Tags.CollectionChanged += (_, _) => RaisePropertyChanged(nameof(DisplayText));
+    }
+
     /// <summary>设备 ID。</summary>
     public string DeviceId { get; init; } = string.Empty;
 

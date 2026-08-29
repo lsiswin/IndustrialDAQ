@@ -318,8 +318,9 @@ public class TrendViewModel : BindableBase, IDestructible
         _connectionTimer.Tick += OnConnectionTimerTick;
         _connectionTimer.Start();
 
-        // 加载可用 Tag
+        // 页面可能早于设备异步启动完成，先加载现有快照，再主动从数据库重载一次资源树。
         LoadAvailableTags();
+        _ = InitializeResourceOptionsAsync();
     }
 
     private async Task ExportHistoryAsync()
@@ -370,6 +371,20 @@ public class TrendViewModel : BindableBase, IDestructible
         LoadAlarmLines();
     }
 
+    /// <summary>主动重载资源树，消除趋势页首次打开与设备启动之间的竞态。</summary>
+    private async Task InitializeResourceOptionsAsync()
+    {
+        try
+        {
+            await _resourceTreeService.ReloadAsync();
+            Application.Current?.Dispatcher.Invoke(SyncAvailableTags);
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"数据点加载失败：{ex.Message}";
+        }
+    }
+
     /// <summary>
     /// 加载报警线到图表（使用固定 X 范围，避免越界）。
     /// </summary>
@@ -415,25 +430,49 @@ public class TrendViewModel : BindableBase, IDestructible
 
     private void SyncAvailableTags()
     {
-        var trackedTagIds = _trendEngine.DataStore.TrackedTagIds
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var snapshot = _resourceTreeService.Current;
-        var deviceById = snapshot.Nodes
-            .Where(node => node.IsEnabled && node.ResourceType == ResourceType.Device)
+        var ownerById = snapshot.Nodes
+            .Where(node => node.IsEnabled && node.ResourceType is ResourceType.Device or ResourceType.Area)
             .ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+
+        var numericTagNodes = snapshot.Nodes
+            .Where(node => node.IsEnabled && node.ResourceType == ResourceType.Tag)
+            .Select(node => new
+            {
+                Node = node,
+                Parsed = TryReadTagMetadata(node.MetadataJson, out var tagId, out var dataType),
+                TagId = tagId,
+                DataType = dataType
+            })
+            .Where(item => item.Parsed && IsNumericDataType(item.DataType) &&
+                           item.Node.ParentId is not null && ownerById.ContainsKey(item.Node.ParentId))
+            .OrderBy(item => item.Node.SortOrder)
+            .ToList();
+
+        // 资源树是可选择项的唯一来源；趋势缓存只负责提供实时值，不能用于过滤 UI 列表。
+        var validTagIds = numericTagNodes.Select(item => item.TagId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var staleTag in AvailableTags.Where(item => !validTagIds.Contains(item.TagId)).ToList())
+        {
+            AvailableTags.Remove(staleTag);
+            SelectedTags.Remove(staleTag);
+            if (_seriesMap.Remove(staleTag.TagId, out var staleSeries)) Series.Remove(staleSeries);
+            foreach (var device in AvailableDevices) device.Tags.Remove(staleTag);
+        }
+        foreach (var emptyDevice in AvailableDevices.Where(device => device.Tags.Count == 0).ToList())
+            AvailableDevices.Remove(emptyDevice);
+        if (SelectedDevice is not null && !AvailableDevices.Contains(SelectedDevice))
+            SelectedDevice = null;
 
         int colorIdx = AvailableTags.Count;
         var usedColors = AvailableTags
             .Select(item => item.Color)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var tagNode in snapshot.Nodes
-                     .Where(node => node.IsEnabled && node.ResourceType == ResourceType.Tag)
-                     .OrderBy(node => node.SortOrder))
+        foreach (var candidate in numericTagNodes)
         {
-            if (!TryReadTagMetadata(tagNode.MetadataJson, out var tagId, out var dataType)) continue;
-            if (!trackedTagIds.Contains(tagId) || !IsNumericDataType(dataType)) continue;
+            var tagNode = candidate.Node;
+            var tagId = candidate.TagId;
             if (AvailableTags.Any(item => item.TagId == tagId)) continue;
-            if (tagNode.ParentId is null || !deviceById.TryGetValue(tagNode.ParentId, out var deviceNode)) continue;
+            if (tagNode.ParentId is null || !ownerById.TryGetValue(tagNode.ParentId, out var deviceNode)) continue;
 
             var template = _trendEngine.DataStore.GetTemplate(tagId);
             string color = template?.LineColor ?? Colors[colorIdx++ % Colors.Length];
@@ -588,7 +627,13 @@ public class TrendViewModel : BindableBase, IDestructible
         _defaultSelectionCount = defaults.Count;
     }
 
-    private void OnConnectionTimerTick(object? sender, EventArgs e) => UpdateConnectionWarning();
+    private async void OnConnectionTimerTick(object? sender, EventArgs e)
+    {
+        // 设备异步启动或配置热更新后，即使趋势注册事件早于页面订阅，也能自动恢复选择列表。
+        if (AvailableDevices.Count == 0)
+            await InitializeResourceOptionsAsync();
+        UpdateConnectionWarning();
+    }
 
     /// <summary>
     /// 检查当前浏览设备以及所有已选曲线所属设备，任一掉线都会给出明确提醒。
