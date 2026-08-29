@@ -83,6 +83,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<PermissionManagementService>();
         containerRegistry.RegisterSingleton<RuntimeSettingsService>();
         containerRegistry.RegisterSingleton<HistoricalDataRetentionService>();
+        containerRegistry.RegisterSingleton<RuntimeConfigurationHotReloadService>();
 
         containerRegistry.RegisterSingleton<IAuthorizationRepository, AuthorizationRepository>();
         containerRegistry.RegisterSingleton<IAuthorizationService, AuthorizationService>();
@@ -633,7 +634,7 @@ public partial class App : PrismApplication
             }
             else
             {
-                var jsonFiles = Directory.GetFiles(configDir, "*.json");
+                var jsonFiles = Directory.GetFiles(configDir, "*.json").Where(path => !RuntimeConfigurationHotReloadService.IsRuntimeConfiguration(path)).ToArray();
                 if (jsonFiles.Length == 0)
                 {
                     Log.Warning("配置目录 {Path} 中无 JSON 文件，使用 Mock 设备", configDir);
@@ -793,8 +794,8 @@ public partial class App : PrismApplication
             EnableRaisingEvents = true
         };
 
-        FileSystemEventHandler handler = (s, e) => OnConfigurationChanged(configDir, host, writer);
-        RenamedEventHandler renamedHandler = (s, e) => OnConfigurationChanged(configDir, host, writer);
+        FileSystemEventHandler handler = (s, e) => OnConfigurationChanged(configDir, host, writer, e.FullPath);
+        RenamedEventHandler renamedHandler = (s, e) => OnConfigurationChanged(configDir, host, writer, e.FullPath);
 
         _configWatcher.Changed += handler;
         _configWatcher.Created += handler;
@@ -802,7 +803,7 @@ public partial class App : PrismApplication
         _configWatcher.Renamed += renamedHandler;
     }
 
-    private void OnConfigurationChanged(string configDir, AcquisitionHost host, HistoryWriter writer)
+    private void OnConfigurationChanged(string configDir, AcquisitionHost host, HistoryWriter writer, string changedPath)
     {
         _debounceCts?.Cancel();
         _debounceCts = new CancellationTokenSource();
@@ -815,8 +816,16 @@ public partial class App : PrismApplication
                 await Task.Delay(500, token); // 防抖 500ms
                 if (!token.IsCancellationRequested)
                 {
-                    Log.Information("检测到配置目录变更，正在重新加载所有设备...");
-                    await ReloadConfigurationAsync(configDir, host, writer);
+                    if (RuntimeConfigurationHotReloadService.IsRuntimeConfiguration(changedPath))
+                    {
+                        Log.Information("检测到运行时配置变更: {File}", Path.GetFileName(changedPath));
+                        await Container.Resolve<RuntimeConfigurationHotReloadService>().ReloadAsync(changedPath, token);
+                    }
+                    else
+                    {
+                        Log.Information("检测到设备配置目录变更，正在重新加载所有设备...");
+                        await ReloadConfigurationAsync(configDir, host, writer);
+                    }
                 }
             }
             catch (TaskCanceledException) { /* 预期内取消 */ }
@@ -834,7 +843,7 @@ public partial class App : PrismApplication
 
             // 合并所有 JSON 文件中的设备配置
             var allNewConfigs = new List<DeviceConfig>();
-            var jsonFiles = Directory.GetFiles(configDir, "*.json");
+            var jsonFiles = Directory.GetFiles(configDir, "*.json").Where(path => !RuntimeConfigurationHotReloadService.IsRuntimeConfiguration(path)).ToArray();
             foreach (var file in jsonFiles)
             {
                 try
