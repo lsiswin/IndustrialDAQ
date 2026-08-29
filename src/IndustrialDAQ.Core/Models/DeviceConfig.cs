@@ -46,6 +46,13 @@ public sealed class DeviceConfig
     /// </summary>
     public string? OpcUaPasswordEnvironmentVariable { get; init; }
 
+    /// <summary>MQTT 客户端标识；留空时按设备 ID 生成。</summary>
+    public string? MqttClientId { get; init; }
+    public string? MqttUsername { get; init; }
+    /// <summary>保存 MQTT 密码的环境变量名称。</summary>
+    public string? MqttPasswordEnvironmentVariable { get; init; }
+    public bool MqttUseTls { get; init; }
+
     /// <summary>Tag points belonging to this device.</summary>
     public List<TagPoint> Tags { get; init; } = new();
 }

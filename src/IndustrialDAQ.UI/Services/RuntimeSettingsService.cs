@@ -37,6 +37,8 @@ public sealed class RuntimeSettingsService
         StationAddress = source.StationAddress, CpuSlot = source.CpuSlot, CycleTimeMs = source.CycleTimeMs,
         TimeoutMs = Current.AcquisitionTimeoutMs, RetryCount = Current.RetryCount,
         OpcUaUsername = source.OpcUaUsername, OpcUaPasswordEnvironmentVariable = source.OpcUaPasswordEnvironmentVariable,
+        MqttClientId = source.MqttClientId, MqttUsername = source.MqttUsername,
+        MqttPasswordEnvironmentVariable = source.MqttPasswordEnvironmentVariable, MqttUseTls = source.MqttUseTls,
         Tags = source.Tags.Select(tag => new TagPoint
         {
             Id = tag.Id, Name = tag.Name, Address = tag.Address, DataType = tag.DataType, ScanRateMs = tag.ScanRateMs,

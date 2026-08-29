@@ -9,6 +9,7 @@
     <ProjectReference Include="..\IndustrialDAQ.Storage\IndustrialDAQ.Storage.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Trend\IndustrialDAQ.Trend.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.Modbus\Drivers.Modbus.csproj" />
+    <ProjectReference Include="..\..\Plugins\Drivers.Mqtt\Drivers.Mqtt.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.OpcUA\Drivers.OpcUA.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.S7\Drivers.S7.csproj" />
   </ItemGroup>

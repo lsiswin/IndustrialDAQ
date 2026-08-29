@@ -52,6 +52,10 @@ public static class DeviceConfigurationLoader
         public int RetryCount { get; set; } = 3;
         public string? OpcUaUsername { get; set; }
         public string? OpcUaPasswordEnvironmentVariable { get; set; }
+        public string? MqttClientId { get; set; }
+        public string? MqttUsername { get; set; }
+        public string? MqttPasswordEnvironmentVariable { get; set; }
+        public bool MqttUseTls { get; set; }
         public string? Description { get; set; }
         public List<TagPointDto> Tags { get; set; } = new();
 
@@ -69,6 +73,10 @@ public static class DeviceConfigurationLoader
             RetryCount = RetryCount,
             OpcUaUsername = OpcUaUsername,
             OpcUaPasswordEnvironmentVariable = OpcUaPasswordEnvironmentVariable,
+            MqttClientId = MqttClientId,
+            MqttUsername = MqttUsername,
+            MqttPasswordEnvironmentVariable = MqttPasswordEnvironmentVariable,
+            MqttUseTls = MqttUseTls,
             Tags = Tags.Select(t => t.ToTagPoint(DriverType)).ToList()
         };
     }
@@ -112,6 +120,7 @@ public static class DeviceConfigurationLoader
                 "OPCUA" => OpcUaAddress ?? Address ?? string.Empty,
                 "MODBUS" => ModbusAddress ?? Address ?? string.Empty,
                 "S7" => S7Address ?? Address ?? string.Empty,
+                "MQTT" => Address ?? string.Empty,
                 _ => Address ?? string.Empty
             };
 

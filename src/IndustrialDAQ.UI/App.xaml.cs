@@ -201,6 +201,9 @@ public partial class App : PrismApplication
             return Task.FromResult<IProtocolDriver>(driver);
         });
 
+        driverFactory.RegisterDriver("MQTT", (config, ct) =>
+            Task.FromResult<IProtocolDriver>(new global::Drivers.Mqtt.MqttDriver(config)));
+
         // ── 启动采集宿主和历史写入器 ──
         var acquisitionHost = Container.Resolve<AcquisitionHost>();
         var historyWriter = Container.Resolve<HistoryWriter>();
