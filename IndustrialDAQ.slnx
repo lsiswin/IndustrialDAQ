@@ -8,6 +8,9 @@
   <Folder Name="/sandbox/">
     <Project Path="sandbox/IndustrialDAQ.ConsoleTest/IndustrialDAQ.ConsoleTest.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/IndustrialDAQ.Tests/IndustrialDAQ.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/IndustrialDAQ.Acquisition/IndustrialDAQ.Acquisition.csproj" />
     <Project Path="src/IndustrialDAQ.Alarm/IndustrialDAQ.Alarm.csproj" />
