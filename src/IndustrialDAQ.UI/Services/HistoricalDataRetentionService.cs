@@ -1,6 +1,8 @@
 using IndustrialDAQ.Infrastructure;
 using IndustrialDAQ.Storage;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -39,7 +41,17 @@ public sealed class HistoricalDataRetentionService : IHostedService
         var days = _settings.Current.HistoryRetentionDays;
         var cutoff = DateTimeOffset.UtcNow.AddDays(-days).ToString("O");
         await using var db = await _factory.CreateDbContextAsync(cancellationToken);
-        var historyCount = await db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM historical_records WHERE Timestamp < {cutoff}", cancellationToken);
+        var sqlHelper = db.GetService<ISqlGenerationHelper>();
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        // 由当前数据库提供程序生成标识符引号，兼容 PostgreSQL 大小写列名与 SQLite。
+        command.CommandText = $"DELETE FROM {sqlHelper.DelimitIdentifier("historical_records")} WHERE {sqlHelper.DelimitIdentifier("Timestamp")} < @cutoff";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@cutoff";
+        parameter.Value = cutoff;
+        command.Parameters.Add(parameter);
+        if (command.Connection!.State != System.Data.ConnectionState.Open)
+            await command.Connection.OpenAsync(cancellationToken);
+        var historyCount = await command.ExecuteNonQueryAsync(cancellationToken);
         var alarmCount = await _alarmRepository.CleanupAsync(days, cancellationToken);
         await _audit.RecordAsync("system", "System", "HistoryRetentionCleanup", "System/Storage", $"RetentionDays={days};History={historyCount};Alarms={alarmCount}", true);
         _logger.LogInformation("历史保留清理完成，测点 {HistoryCount} 条，报警 {AlarmCount} 条", historyCount, alarmCount);
