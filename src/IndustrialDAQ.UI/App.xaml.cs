@@ -16,6 +16,8 @@ using IndustrialDAQ.Infrastructure;
 using IndustrialDAQ.Infrastructure.Alarms;
 using IndustrialDAQ.Infrastructure.Authorization;
 using IndustrialDAQ.Infrastructure.ResourceTree;
+using IndustrialDAQ.Infrastructure.Processing;
+using IndustrialDAQ.Processing;
 using IndustrialDAQ.Storage;
 using IndustrialDAQ.Trend;
 using IndustrialDAQ.UI.ViewModels;
@@ -52,6 +54,8 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<RealTimeStore>();
         containerRegistry.RegisterSingleton<AcquisitionHost>();
         containerRegistry.RegisterSingleton<HistoryWriter>();
+        containerRegistry.RegisterSingleton<DataProcessor>();
+        containerRegistry.RegisterSingleton<CalculationRuleRepository>();
         containerRegistry.RegisterSingleton<MainWindowViewModel>();
 
         // 报警系统服务（统一走新链路，AlarmManager 仅作为 UI 兼容门面）
@@ -195,9 +199,12 @@ public partial class App : PrismApplication
         // ── 启动采集宿主和历史写入器 ──
         var acquisitionHost = Container.Resolve<AcquisitionHost>();
         var historyWriter = Container.Resolve<HistoryWriter>();
+        var dataProcessor = Container.Resolve<DataProcessor>();
 
         _ = acquisitionHost.StartAsync(CancellationToken.None);
         _ = historyWriter.StartAsync(CancellationToken.None);
+        _ = dataProcessor.StartAsync(CancellationToken.None);
+        _ = LoadCalculationRulesAsync(dataProcessor);
 
         // ── 启动报警系统 ──
         var alarmManager = Container.Resolve<AlarmManager>();
@@ -219,6 +226,19 @@ public partial class App : PrismApplication
         // ── 导航到仪表板 ──
         var regionManager = Container.Resolve<IRegionManager>();
         regionManager.RequestNavigate("MainRegion", nameof(DashboardView));
+    }
+
+    private async Task LoadCalculationRulesAsync(DataProcessor processor)
+    {
+        try
+        {
+            var repository = Container.Resolve<CalculationRuleRepository>();
+            processor.ReplaceRules(await repository.LoadAsync());
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "计算规则加载失败");
+        }
     }
 
     /// <summary>
@@ -387,6 +407,18 @@ public partial class App : PrismApplication
             CREATE INDEX IF NOT EXISTS IX_permission_policies_IsEnabled ON permission_policies(IsEnabled);
             CREATE INDEX IF NOT EXISTS IX_permission_policies_SubjectType_SubjectId_Action ON permission_policies(SubjectType, SubjectId, Action);
             CREATE INDEX IF NOT EXISTS IX_permission_policies_ResourcePath_Action ON permission_policies(ResourcePath, Action);
+            CREATE TABLE IF NOT EXISTS calculation_rules (
+                RuleId TEXT PRIMARY KEY,
+                Expression TEXT NOT NULL,
+                InputTagNamesJson TEXT NOT NULL,
+                TargetTagId TEXT NOT NULL,
+                TargetTagName TEXT NOT NULL,
+                TargetDataType TEXT NOT NULL,
+                Enabled INTEGER NOT NULL DEFAULT 1,
+                UpdatedAtUtc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_calculation_rules_Enabled ON calculation_rules(Enabled);
+            CREATE INDEX IF NOT EXISTS IX_calculation_rules_TargetTagId ON calculation_rules(TargetTagId);
         ";
         cmd.ExecuteNonQuery();
 

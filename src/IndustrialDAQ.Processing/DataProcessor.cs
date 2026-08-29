@@ -65,6 +65,15 @@ public sealed class DataProcessor : IHostedService
         foreach (var rule in rules) RegisterRule(rule);
     }
 
+    /// <summary>使用持久化规则完整替换运行时快照，避免删除或停用后旧规则继续执行。</summary>
+    public void ReplaceRules(IEnumerable<CalculationRule> rules)
+    {
+        _rules.Clear();
+        _tagToRules.Clear();
+        RegisterRules(rules);
+        _logger.LogInformation("计算规则运行时快照已更新，共 {Count} 条", _rules.Count);
+    }
+
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {

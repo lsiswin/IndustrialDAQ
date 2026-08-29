@@ -19,6 +19,7 @@ public class SystemSettingsViewModel : BindableBase
     /// <summary>报警规则子页面 ViewModel，显式绑定以避免继承系统设置的 DataContext。</summary>
     public AlarmRuleConfigViewModel AlarmRuleConfig { get; }
     public UserAccessManagementViewModel UserAccessManagement { get; }
+    public CalculationRuleManagementViewModel CalculationRuleManagement { get; }
 
     /// <summary>设置分类集合。</summary>
     public ObservableCollection<SettingsCategory> Categories { get; } = new();
@@ -71,10 +72,11 @@ public class SystemSettingsViewModel : BindableBase
         }
     }
 
-    public SystemSettingsViewModel(AlarmRuleConfigViewModel alarmRuleConfig, UserAccessManagementViewModel userAccessManagement, IAuthManager authManager)
+    public SystemSettingsViewModel(AlarmRuleConfigViewModel alarmRuleConfig, UserAccessManagementViewModel userAccessManagement, CalculationRuleManagementViewModel calculationRuleManagement, IAuthManager authManager)
     {
         AlarmRuleConfig = alarmRuleConfig;
         UserAccessManagement = userAccessManagement;
+        CalculationRuleManagement = calculationRuleManagement;
         _authManager = authManager;
         SaveCommand = new DelegateCommand(OnSave, () => CanModify);
         ResetCommand = new DelegateCommand(OnReset, () => CanModify);
@@ -90,6 +92,7 @@ public class SystemSettingsViewModel : BindableBase
         Categories.Add(new SettingsCategory("通信设置", "Modbus / OPC UA 通信参数", "📡"));
         Categories.Add(new SettingsCategory("存储管理", "历史数据存储和保留策略", "💾"));
         Categories.Add(new SettingsCategory("报警规则", "报警阈值和通知配置", "🔔"));
+        Categories.Add(new SettingsCategory("计算规则", "虚拟量和数据加工表达式", "∑"));
         Categories.Add(new SettingsCategory("日志设置", "Serilog 日志级别和输出目标", "📋"));
         Categories.Add(new SettingsCategory("系统参数", "采集周期、重试、死区等全局参数", "🖥"));
         Categories.Add(new SettingsCategory("用户与权限", "账号、角色和访问状态", "🔐"));

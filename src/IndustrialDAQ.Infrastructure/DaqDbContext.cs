@@ -42,6 +42,7 @@ public sealed class DaqDbContext : DbContext
     public DbSet<RoleEntity> Roles => Set<RoleEntity>();
     public DbSet<UserRoleEntity> UserRoles => Set<UserRoleEntity>();
     public DbSet<SecurityAuditEntity> SecurityAudits => Set<SecurityAuditEntity>();
+    public DbSet<CalculationRuleEntity> CalculationRules => Set<CalculationRuleEntity>();
 
     /// <summary>
     /// 使用选项配置（由 DI 注入连接字符串）。
@@ -162,6 +163,12 @@ public sealed class DaqDbContext : DbContext
             entity.HasIndex(item => item.OccurredAtUtc);
             entity.HasIndex(item => item.UserId);
             entity.HasIndex(item => item.Action);
+        });
+        modelBuilder.Entity<CalculationRuleEntity>(entity =>
+        {
+            entity.HasKey(item => item.RuleId);
+            entity.HasIndex(item => item.Enabled);
+            entity.HasIndex(item => item.TargetTagId);
         });
     }
 }

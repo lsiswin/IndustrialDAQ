@@ -5,6 +5,7 @@
     <ProjectReference Include="..\IndustrialDAQ.Acquisition\IndustrialDAQ.Acquisition.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Alarm\IndustrialDAQ.Alarm.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Infrastructure\IndustrialDAQ.Infrastructure.csproj" />
+    <ProjectReference Include="..\IndustrialDAQ.Processing\IndustrialDAQ.Processing.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Storage\IndustrialDAQ.Storage.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Trend\IndustrialDAQ.Trend.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.Modbus\Drivers.Modbus.csproj" />

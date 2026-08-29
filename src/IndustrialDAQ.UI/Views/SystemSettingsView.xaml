@@ -201,6 +201,32 @@
                             </StackPanel>
                         </Border>
 
+                        <!-- 计算规则只在系统设置中维护，保存后直接热加载到数据加工引擎。 -->
+                        <Border Style="{StaticResource CardBorderStyle}"
+                                Visibility="{Binding SelectedCategory.Name, Converter={StaticResource CategoryToVis}, ConverterParameter=计算规则}">
+                            <Grid DataContext="{Binding CalculationRuleManagement}">
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+                                    <TextBlock Text="∑ 计算规则与虚拟量" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                    <Button Content="新增" Command="{Binding AddCommand}" Margin="16,0,6,0" Padding="12,5"/>
+                                    <Button Content="删除" Command="{Binding DeleteCommand}" Margin="0,0,6,0" Padding="12,5"/>
+                                    <Button Content="刷新" Command="{Binding RefreshCommand}" Padding="12,5"/>
+                                </StackPanel>
+                                <DataGrid Grid.Row="1" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule}" AutoGenerateColumns="False" CanUserAddRows="False" MinHeight="300">
+                                    <DataGrid.Columns>
+                                        <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled}" Width="55"/>
+                                        <DataGridTextColumn Header="规则标识" Binding="{Binding RuleId}" Width="120"/>
+                                        <DataGridTextColumn Header="输入 TagName（逗号分隔）" Binding="{Binding InputTags}" Width="2*"/>
+                                        <DataGridTextColumn Header="表达式" Binding="{Binding Expression}" Width="2*"/>
+                                        <DataGridTextColumn Header="目标 TagId" Binding="{Binding TargetTagId}" Width="140"/>
+                                        <DataGridTextColumn Header="目标名称" Binding="{Binding TargetTagName}" Width="140"/>
+                                        <DataGridComboBoxColumn Header="类型" SelectedItemBinding="{Binding TargetDataType}" ItemsSource="{Binding DataContext.NumericTypes, RelativeSource={RelativeSource AncestorType=DataGrid}}" Width="100"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <Grid Grid.Row="2" Margin="0,10,0,0"><TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextMutedBrush}"/><Button Content="保存并热加载" Command="{Binding SaveCommand}" HorizontalAlignment="Right" Padding="16,7" Visibility="{Binding CanModify, Converter={StaticResource BoolToVisibility}}"/></Grid>
+                            </Grid>
+                        </Border>
+
                         <!-- 用户权限只通过系统设置维护，符合工业现场最小权限原则。 -->
                         <Border Style="{StaticResource CardBorderStyle}"
                                 Visibility="{Binding SelectedCategory.Name, Converter={StaticResource CategoryToVis}, ConverterParameter=用户与权限}">
