@@ -8,6 +8,7 @@ using IndustrialDAQ.Infrastructure.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace IndustrialDAQ.Storage;
 
@@ -33,6 +34,8 @@ public sealed class HistoryWriter : IHostedService
 
     private const int BatchSize = 1_000;
     private const int FlushIntervalMs = 1_000;
+    private const int MaxWriteAttempts = 3;
+    private readonly string _deadLetterPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IndustrialDAQ", "history-dead-letter.jsonl");
 
     /// <summary>
     /// 初始化历史写入器。
@@ -82,7 +85,11 @@ public sealed class HistoryWriter : IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = new CancellationTokenSource();
-        _consumeTask = Task.Run(() => ConsumeAsync(_cts.Token), _cts.Token);
+        _consumeTask = Task.Run(async () =>
+        {
+            await ReplayDeadLettersAsync(_cts.Token).ConfigureAwait(false);
+            await ConsumeAsync(_cts.Token).ConfigureAwait(false);
+        }, _cts.Token);
         _logger.LogInformation("历史写入器已启动 (批量={BatchSize}, 刷新间隔={FlushMs}ms)",
             BatchSize, FlushIntervalMs);
         return Task.CompletedTask;
@@ -196,27 +203,63 @@ public sealed class HistoryWriter : IHostedService
     {
         if (batch.Count == 0) return;
 
+        var records = batch.Select(MapToRecord).ToList();
+        for (var attempt = 1; attempt <= MaxWriteAttempts; attempt++)
+        {
+            try
+            {
+                await WriteRecordsAsync(records, ct).ConfigureAwait(false);
+                _logger.LogDebug("已写入 {Count} 条历史记录", records.Count);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "历史批次写入失败，第 {Attempt}/{MaxAttempts} 次，记录数 {Count}", attempt, MaxWriteAttempts, records.Count);
+                if (attempt < MaxWriteAttempts) await Task.Delay(TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt - 1)), ct).ConfigureAwait(false);
+            }
+        }
+
+        await AppendDeadLettersAsync(records, ct).ConfigureAwait(false);
+        _logger.LogError("历史批次连续写入失败，已转存死信文件，共 {Count} 条", records.Count);
+    }
+
+    private async Task WriteRecordsAsync(IReadOnlyCollection<HistoricalRecord> records, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        db.HistoricalRecords.AddRange(records);
+        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task AppendDeadLettersAsync(IEnumerable<HistoricalRecord> records, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_deadLetterPath)!);
+        await using var stream = new FileStream(_deadLetterPath, FileMode.Append, FileAccess.Write, FileShare.Read, 4096, true);
+        await using var writer = new StreamWriter(stream);
+        foreach (var record in records) await writer.WriteLineAsync(JsonSerializer.Serialize(record).AsMemory(), cancellationToken);
+    }
+
+    private async Task ReplayDeadLettersAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_deadLetterPath)) return;
         try
         {
-            // DbContextFactory 每次创建独立实例，天然线程安全
-            await using DaqDbContext db = await _dbFactory.CreateDbContextAsync(ct)
-                .ConfigureAwait(false);
-
-            var records = new List<HistoricalRecord>(batch.Count);
-            foreach (TagValue value in batch)
+            var records = new List<HistoricalRecord>();
+            foreach (var line in await File.ReadAllLinesAsync(_deadLetterPath, cancellationToken))
             {
-                records.Add(MapToRecord(value));
+                if (!string.IsNullOrWhiteSpace(line) && JsonSerializer.Deserialize<HistoricalRecord>(line) is { } record)
+                {
+                    record.Id = 0;
+                    records.Add(record);
+                }
             }
-
-            db.HistoricalRecords.AddRange(records);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            _logger.LogDebug("已写入 {Count} 条历史记录", records.Count);
+            if (records.Count == 0) { File.Delete(_deadLetterPath); return; }
+            await WriteRecordsAsync(records, cancellationToken).ConfigureAwait(false);
+            File.Delete(_deadLetterPath);
+            _logger.LogInformation("已成功回放 {Count} 条历史死信记录", records.Count);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "批量写入历史库失败 ({Count} 条记录丢失)", batch.Count);
-            // 工业场景：写入失败不阻塞采集管道，仅记录日志
+            _logger.LogError(ex, "历史死信回放失败，将在下次启动重试");
         }
     }
 
