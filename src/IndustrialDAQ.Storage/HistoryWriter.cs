@@ -225,11 +225,13 @@ public sealed class HistoryWriter : IHostedService
     /// </summary>
     private static HistoricalRecord MapToRecord(TagValue value)
     {
+        var encoded = HistoricalValueCodec.Serialize(value.Value, value.DataType);
         return new HistoricalRecord
         {
             TagId = value.TagId,
             TagName = value.TagName,
-            Value = value.Value?.ToString(),
+            Value = encoded.Value,
+            ValueType = encoded.ValueType,
             QualityCode = (byte)value.Quality,
             Timestamp = value.Timestamp.ToString("O")   // ISO 8601 往返格式
         };

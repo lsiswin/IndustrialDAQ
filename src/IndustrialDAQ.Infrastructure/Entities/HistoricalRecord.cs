@@ -33,6 +33,10 @@ public sealed class HistoricalRecord
     [MaxLength(256)]
     public string? Value { get; set; }
 
+    /// <summary>原始 CLR 类型名称，用于从历史库恢复 bool、string 和各类数值。</summary>
+    [MaxLength(128)]
+    public string ValueType { get; set; } = "System.String";
+
     /// <summary>质量码（存储枚举底层字节值）。</summary>
     public byte QualityCode { get; set; }
 

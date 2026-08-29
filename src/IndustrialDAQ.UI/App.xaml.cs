@@ -451,7 +451,23 @@ public partial class App : PrismApplication
         ";
         cmd.ExecuteNonQuery();
 
+        EnsureSqliteColumn(conn, "historical_records", "ValueType", "TEXT NOT NULL DEFAULT 'System.String'");
+
         Log.Information("模板相关表已确保存在");
+    }
+
+    private static void EnsureSqliteColumn(System.Data.Common.DbConnection connection, string table, string column, string definition)
+    {
+        using var check = connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info({table})";
+        using var reader = check.ExecuteReader();
+        var exists = false;
+        while (reader.Read()) if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) { exists = true; break; }
+        reader.Close();
+        if (exists) return;
+        using var alter = connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        alter.ExecuteNonQuery();
     }
 
     /// <summary>兼容升级已有现场数据库的账号安全字段和审计表。</summary>

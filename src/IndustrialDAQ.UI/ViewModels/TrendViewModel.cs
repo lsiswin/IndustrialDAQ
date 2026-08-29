@@ -693,7 +693,7 @@ public class TrendViewModel : BindableBase, IDestructible
                     .Where(r => r.TagId == tagId)
                     .OrderByDescending(r => r.Timestamp)
                     .Take(10000)
-                    .Select(r => new { r.Timestamp, r.Value })
+                    .Select(r => new { r.Timestamp, r.Value, r.ValueType })
                     .ToListAsync();
 
                 var pts = new List<(DateTime, double)>();
@@ -701,7 +701,7 @@ public class TrendViewModel : BindableBase, IDestructible
                 {
                     if (!DateTimeOffset.TryParse(row.Timestamp, out var dto)) continue;
                     if (dto < HistoryStart.ToUniversalTime() || dto > HistoryEnd.ToUniversalTime()) continue;
-                    if (!double.TryParse(row.Value, out double v)) continue;
+                    if (!HistoricalValueCodec.TryGetDouble(row.Value, row.ValueType, out double v)) continue;
                     pts.Add((dto.UtcDateTime, v));
                 }
                 pts.Sort(static (left, right) => left.Item1.CompareTo(right.Item1));
