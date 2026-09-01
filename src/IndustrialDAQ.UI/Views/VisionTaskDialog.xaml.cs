@@ -44,7 +44,7 @@ public partial class VisionTaskDialog : UserControl
         var point = ToNormalizedPoint(args.GetPosition(ImageSelectionHost));
         if (point is null) return;
         _dragStart = point;
-        ImageSelectionHost.CaptureMouse();
+        SelectionInputLayer.CaptureMouse();
         args.Handled = true;
     }
 
@@ -59,7 +59,7 @@ public partial class VisionTaskDialog : UserControl
         if (_dragStart is null) return;
         UpdateDraggedRegion(args.GetPosition(ImageSelectionHost));
         _dragStart = null;
-        ImageSelectionHost.ReleaseMouseCapture();
+        SelectionInputLayer.ReleaseMouseCapture();
         _viewModel?.CompleteRegionSelection();
         UpdateSelectionCursor();
         args.Handled = true;
@@ -101,8 +101,12 @@ public partial class VisionTaskDialog : UserControl
 
     private void OnImageHostSizeChanged(object sender, SizeChangedEventArgs args) => UpdateRegionOverlays();
 
-    private void UpdateSelectionCursor() =>
-        ImageSelectionHost.Cursor = _viewModel?.IsRegionDrawing == true ? Cursors.Cross : Cursors.Arrow;
+    private void UpdateSelectionCursor()
+    {
+        var enabled = _viewModel?.IsRegionDrawing == true;
+        SelectionInputLayer.IsHitTestVisible = enabled;
+        SelectionInputLayer.Cursor = enabled ? Cursors.Cross : Cursors.Arrow;
+    }
 
     private void UpdateRegionOverlays()
     {

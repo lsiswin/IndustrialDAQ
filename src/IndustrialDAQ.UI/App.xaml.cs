@@ -145,6 +145,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterDialog<LoginDialog, LoginDialogViewModel>();
         containerRegistry.RegisterDialog<RegisterDialog, RegisterDialogViewModel>();
         containerRegistry.RegisterDialog<VisionTaskDialog, VisionTaskDialogViewModel>();
+        containerRegistry.RegisterDialog<VisionCameraDialog, VisionCameraDialogViewModel>();
     }
 
     protected override IContainerExtension CreateContainerExtension()

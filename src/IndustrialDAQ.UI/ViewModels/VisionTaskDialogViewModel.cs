@@ -122,7 +122,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             RaisePropertyChanged(nameof(SelectionInstruction));
         }
     }
-    public string RegionSelectionButtonText => IsRegionDrawing ? "正在框选，请在左图拖动..." : "▣ 开始框选";
+    public string RegionSelectionButtonText => IsRegionDrawing ? "✕ 取消框选" : "▣ 开始框选";
     public string SelectionInstruction => SelectedOperator?.OperatorType switch
     {
         "RoiCrop" when IsRegionDrawing => "框选模式已开启：在左侧图像按下并拖动鼠标（蓝框）",
@@ -165,8 +165,9 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         ScanHikvisionCommand = new DelegateCommand(async () => await ScanHikvisionAsync());
         AddOperatorCommand = new DelegateCommand(AddOperator, () => SelectedAvailableOperator is not null);
         RemoveOperatorCommand = new DelegateCommand(RemoveOperator, () => SelectedOperator is not null);
-        MoveUpCommand = new DelegateCommand(() => MoveOperator(-1), () => SelectedOperator is not null && Operators.IndexOf(SelectedOperator) > 0);
-        MoveDownCommand = new DelegateCommand(() => MoveOperator(1), () => SelectedOperator is not null && Operators.IndexOf(SelectedOperator) < Operators.Count - 1);
+        // 移动按钮只依赖是否选中算子，边界由 MoveOperator 处理，避免 Collection.Move 后命令状态卡死。
+        MoveUpCommand = new DelegateCommand(() => MoveOperator(-1), () => SelectedOperator is not null);
+        MoveDownCommand = new DelegateCommand(() => MoveOperator(1), () => SelectedOperator is not null);
         StartRegionSelectionCommand = new DelegateCommand(BeginRegionSelection, () => CanDrawRegion);
         TeachCommand = new DelegateCommand(async () => await TeachAndTestAsync());
         SaveCommand = new DelegateCommand(async () => await SaveAsync());
@@ -250,6 +251,12 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private void BeginRegionSelection()
     {
         if (!CanDrawRegion) return;
+        if (IsRegionDrawing)
+        {
+            IsRegionDrawing = false;
+            StatusText = "已取消框选";
+            return;
+        }
         IsRegionDrawing = true;
         StatusText = SelectedOperator?.OperatorType == "RoiCrop"
             ? "请在左侧图片上拖动鼠标框选 ROI 搜索区域"

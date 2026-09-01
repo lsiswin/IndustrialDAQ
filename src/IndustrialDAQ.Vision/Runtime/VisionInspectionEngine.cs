@@ -46,7 +46,12 @@ public sealed class VisionInspectionEngine : IHostedService
 
     public event EventHandler<VisionInspectionResult>? ResultProduced;
     public event EventHandler<VisionInspectionCompletedEventArgs>? InspectionCompleted;
+    public event EventHandler<VisionFrameReceivedEventArgs>? FrameReceived;
+    public event EventHandler<VisionCameraStatusEventArgs>? CameraStatusChanged;
     public bool IsPaused => _isPaused;
+
+    public bool IsCameraConnected(string cameraId) =>
+        _drivers.TryGetValue(cameraId, out var driver) && driver.IsConnected;
 
     public void Pause() => _isPaused = true;
     public void Resume() => _isPaused = false;
@@ -74,7 +79,7 @@ public sealed class VisionInspectionEngine : IHostedService
         await _reloadLock.WaitAsync(cancellationToken);
         try
         {
-            if (_cameraLoops.Count > 0)
+            if (_cameraLoops.Count > 0 || _drivers.Count > 0)
             {
                 _cts?.Cancel();
                 try { await Task.WhenAll(_cameraLoops); } catch (OperationCanceledException) { }
@@ -98,9 +103,9 @@ public sealed class VisionInspectionEngine : IHostedService
             foreach (var camera in cameras.Where(item => item.IsEnabled))
             {
                 var cameraTasks = tasks.Where(item => item.IsEnabled && item.CameraId == camera.CameraId).ToArray();
-                if (cameraTasks.Length == 0) continue;
                 var driver = CreateDriver(camera);
                 _drivers[camera.CameraId] = driver;
+                CameraStatusChanged?.Invoke(this, new VisionCameraStatusEventArgs(camera.CameraId, driver.IsConnected));
                 foreach (var task in cameraTasks) await _publisher.PublishStatusAsync(task, driver.IsConnected, true, cancellationToken);
                 if (camera.TriggerMode == VisionTriggerMode.Continuous)
                     _cameraLoops.Add(Task.Run(() => RunCameraAsync(driver, cameraTasks, _cts.Token), _cts.Token));
@@ -112,13 +117,22 @@ public sealed class VisionInspectionEngine : IHostedService
 
     public async Task<VisionInspectionResult?> TriggerAsync(string cameraId, CancellationToken cancellationToken = default)
     {
-        if (!_drivers.TryGetValue(cameraId, out var driver)) return null;
-        var frame = await driver.TriggerAsync(cancellationToken);
+        var frame = await TriggerFrameAsync(cameraId, cancellationToken);
         if (frame is null) return null;
         var tasks = (await _repository.LoadTasksAsync(cancellationToken)).Where(item => item.IsEnabled && item.CameraId == cameraId).ToArray();
         VisionInspectionResult? last = null;
         foreach (var task in tasks) last = await InspectAsync(frame, task, cancellationToken);
         return last;
+    }
+
+    public async Task<VisionFrame?> TriggerFrameAsync(string cameraId, CancellationToken cancellationToken = default)
+    {
+        if (!_drivers.TryGetValue(cameraId, out var driver)) return null;
+        var frame = await driver.TriggerAsync(cancellationToken);
+        if (frame is null) return null;
+        CameraStatusChanged?.Invoke(this, new VisionCameraStatusEventArgs(cameraId, driver.IsConnected));
+        FrameReceived?.Invoke(this, new VisionFrameReceivedEventArgs(frame));
+        return frame;
     }
 
     private async Task RunCameraAsync(IVisionCameraDriver driver, IReadOnlyList<VisionInspectionTask> tasks, CancellationToken cancellationToken)
@@ -127,6 +141,8 @@ public sealed class VisionInspectionEngine : IHostedService
         {
             await foreach (var frame in driver.CaptureAsync(cancellationToken))
             {
+                CameraStatusChanged?.Invoke(this, new VisionCameraStatusEventArgs(driver.CameraId, true));
+                FrameReceived?.Invoke(this, new VisionFrameReceivedEventArgs(frame));
                 if (_isPaused) continue;
                 foreach (var task in tasks) await InspectAsync(frame, task, cancellationToken);
             }
@@ -135,6 +151,7 @@ public sealed class VisionInspectionEngine : IHostedService
         catch (Exception ex)
         {
             _logger.LogError(ex, "视觉相机 {CameraId} 运行失败", driver.CameraId);
+            CameraStatusChanged?.Invoke(this, new VisionCameraStatusEventArgs(driver.CameraId, false));
             foreach (var task in tasks) await _publisher.PublishStatusAsync(task, false, false, CancellationToken.None);
         }
     }
@@ -182,4 +199,17 @@ public sealed class VisionInspectionCompletedEventArgs : EventArgs
     public VisionInspectionResult Result { get; }
     public VisionInspectionCompletedEventArgs(VisionFrame frame, VisionInspectionResult result) =>
         (Frame, Result) = (frame, result);
+}
+
+/// <summary>相机原始帧通知，与是否已经配置检测任务无关。</summary>
+public sealed class VisionFrameReceivedEventArgs(VisionFrame frame) : EventArgs
+{
+    public VisionFrame Frame { get; } = frame;
+}
+
+/// <summary>相机运行连接状态通知，供工作台按钮和状态栏统一联动。</summary>
+public sealed class VisionCameraStatusEventArgs(string cameraId, bool isConnected) : EventArgs
+{
+    public string CameraId { get; } = cameraId;
+    public bool IsConnected { get; } = isConnected;
 }

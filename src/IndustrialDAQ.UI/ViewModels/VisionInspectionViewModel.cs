@@ -11,7 +11,7 @@ using Prism.Mvvm;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
-/// <summary>通用视觉检测工作台，展示实时图像、任务配方、指标和检测历史。</summary>
+/// <summary>通用视觉工作台，相机实时预览与检测配方相互独立。</summary>
 public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 {
     private readonly IVisionConfigurationRepository _repository;
@@ -19,16 +19,20 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     private readonly VisionResultPublisher _publisher;
     private readonly IDialogService _dialogService;
     private readonly IAuthManager _authManager;
+    private readonly List<VisionTaskListItem> _allTasks = [];
+    private VisionCameraListItem? _selectedCamera;
     private VisionTaskListItem? _selectedTask;
     private BitmapImage? _previewImage;
-    private string _resultText = "等待检测";
+    private string _resultText = "等待相机画面";
     private string _resultColor = "#94A3B8";
-    private string _detailText = "请选择或新增视觉任务";
+    private string _detailText = "请先选择相机";
     private string _frameInfo = "尚未接收图像";
     private long _totalCount;
     private long _ngCount;
     private bool _isPaused;
+    private bool _isCameraConnected;
 
+    public ObservableCollection<VisionCameraListItem> Cameras { get; } = [];
     public ObservableCollection<VisionTaskListItem> Tasks { get; } = [];
     public ObservableCollection<VisionHistoryItem> History { get; } = [];
     public ObservableCollection<VisionRecipeDisplayItem> CurrentRecipe { get; } = [];
@@ -47,6 +51,22 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public bool IsPaused { get => _isPaused; private set { SetProperty(ref _isPaused, value); RaisePropertyChanged(nameof(PauseButtonText)); } }
     public string PauseButtonText => IsPaused ? "▶ 继续" : "Ⅱ 暂停";
 
+    public VisionCameraListItem? SelectedCamera
+    {
+        get => _selectedCamera;
+        set
+        {
+            if (!SetProperty(ref _selectedCamera, value)) return;
+            FilterTasksForCamera();
+            IsCameraConnected = value is not null && _engine.IsCameraConnected(value.Camera.CameraId);
+            RaiseCameraDetails();
+            RefreshCommands();
+            DetailText = value is null ? "请先选择相机" : IsCameraConnected
+                ? (SelectedTask is null ? "相机已连接，请创建或选择检测配方" : "相机与检测配方已就绪")
+                : "相机未连接，请检查相机配置或图片目录";
+        }
+    }
+
     public VisionTaskListItem? SelectedTask
     {
         get => _selectedTask;
@@ -54,22 +74,41 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         {
             if (!SetProperty(ref _selectedTask, value)) return;
             RaiseTaskDetails();
-            TriggerCommand.RaiseCanExecuteChanged();
-            ConfigureCommand.RaiseCanExecuteChanged();
+            RefreshCommands();
+            if (value is null && SelectedCamera is not null)
+                DetailText = "当前相机没有检测配方，请点击“新增视觉任务”创建";
         }
     }
 
-    public string CameraName => SelectedTask?.CameraName ?? "未配置相机";
-    public string ImageDirectory => SelectedTask?.Camera.ImageDirectory ?? "—";
-    public int FrameInterval => SelectedTask?.Camera.IntervalMilliseconds ?? 0;
-    public bool LoopPlayback => SelectedTask?.Camera.Loop == true;
-    public string RoiText => SelectedTask is null ? "—" : $"X {SelectedTask.Task.Roi.X:P0}  Y {SelectedTask.Task.Roi.Y:P0}  W {SelectedTask.Task.Roi.Width:P0}  H {SelectedTask.Task.Roi.Height:P0}";
-    public double MatchThreshold => SelectedTask?.Task.MatchThreshold ?? 0;
-    public string TemplatePath => SelectedTask?.Task.TemplateImagePath ?? "—";
-    public string ResultResourcePath => SelectedTask is null ? "—" : $"Vision/{Segment(SelectedTask.CameraName)}/{Segment(SelectedTask.Task.Name)}/Result/Pass";
+    public bool IsCameraConnected
+    {
+        get => _isCameraConnected;
+        private set
+        {
+            if (!SetProperty(ref _isCameraConnected, value)) return;
+            RaisePropertyChanged(nameof(CameraStatusText));
+            RaisePropertyChanged(nameof(CameraStatusColor));
+            RaisePropertyChanged(nameof(CanUseCamera));
+            RaisePropertyChanged(nameof(CanRunDetection));
+            RefreshCommands();
+        }
+    }
+
+    public bool CanUseCamera => SelectedCamera is not null && IsCameraConnected;
+    public bool CanRunDetection => CanUseCamera && SelectedTask is not null;
+    public bool HasNoRecipe => SelectedTask is null;
+    public string CameraStatusText => SelectedCamera is null ? "未选择相机" : IsCameraConnected ? $"{SelectedCamera.Name} · 已连接" : $"{SelectedCamera.Name} · 未连接";
+    public string CameraStatusColor => IsCameraConnected ? "#10B981" : "#EF4444";
+    public string CameraName => SelectedCamera?.Name ?? "未配置相机";
+    public string CameraDriver => SelectedCamera?.Camera.DriverType ?? "—";
+    public string ImageDirectory => SelectedCamera?.Camera.ImageDirectory ?? "—";
+    public int FrameInterval => SelectedCamera?.Camera.IntervalMilliseconds ?? 0;
+    public bool LoopPlayback => SelectedCamera?.Camera.Loop == true;
+    public string ResultResourcePath => SelectedTask is null ? "—" : $"Vision/{Segment(CameraName)}/{Segment(SelectedTask.Task.Name)}/Result/Pass";
     public string AlarmRuleName => SelectedTask is null ? "—" : $"VISION_TASK_NG_{SelectedTask.Task.TaskId.ToUpperInvariant()}";
 
     public DelegateCommand AddTaskCommand { get; }
+    public DelegateCommand ConfigureCameraCommand { get; }
     public DelegateCommand ConfigureCommand { get; }
     public DelegateCommand RefreshCommand { get; }
     public DelegateCommand TriggerCommand { get; }
@@ -84,14 +123,17 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         _repository = repository; _engine = engine; _publisher = publisher;
         _dialogService = dialogService; _authManager = authManager;
         AddTaskCommand = new DelegateCommand(() => OpenTaskDialog(null), () => CanModify);
+        ConfigureCameraCommand = new DelegateCommand(OpenCameraDialog, () => CanModify);
         ConfigureCommand = new DelegateCommand(() => OpenTaskDialog(SelectedTask), () => CanModify && SelectedTask is not null);
-        RefreshCommand = new DelegateCommand(async () => await LoadAsync());
-        TriggerCommand = new DelegateCommand(async () => await TriggerAsync(), () => SelectedTask is not null);
-        StartCommand = new DelegateCommand(async () => await StartAsync());
-        PauseCommand = new DelegateCommand(TogglePause);
-        ResetCommand = new DelegateCommand(ResetStatistics, () => CanModify);
+        RefreshCommand = new DelegateCommand(async () => await ReloadRuntimeAsync());
+        TriggerCommand = new DelegateCommand(async () => await TriggerAsync(), () => CanUseCamera);
+        StartCommand = new DelegateCommand(async () => await StartAsync(), () => CanRunDetection);
+        PauseCommand = new DelegateCommand(TogglePause, () => CanRunDetection);
+        ResetCommand = new DelegateCommand(ResetStatistics, () => CanModify && SelectedTask is not null);
         LoginToConfigureCommand = new DelegateCommand(OpenLogin, () => CannotModify);
         _engine.InspectionCompleted += OnInspectionCompleted;
+        _engine.FrameReceived += OnFrameReceived;
+        _engine.CameraStatusChanged += OnCameraStatusChanged;
         _authManager.CurrentUserChanged += OnCurrentUserChanged;
         _ = LoadAsync();
     }
@@ -99,29 +141,62 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public void Destroy()
     {
         _engine.InspectionCompleted -= OnInspectionCompleted;
+        _engine.FrameReceived -= OnFrameReceived;
+        _engine.CameraStatusChanged -= OnCameraStatusChanged;
         _authManager.CurrentUserChanged -= OnCurrentUserChanged;
     }
 
     private async Task LoadAsync()
     {
-        var selectedId = SelectedTask?.Task.TaskId;
+        var selectedCameraId = SelectedCamera?.Camera.CameraId;
+        var selectedTaskId = SelectedTask?.Task.TaskId;
         var cameras = await _repository.LoadCamerasAsync();
         var tasks = await _repository.LoadTasksAsync();
-        Tasks.Clear();
+        Cameras.Clear();
+        foreach (var camera in cameras) Cameras.Add(new VisionCameraListItem(camera));
+        _allTasks.Clear();
         foreach (var task in tasks)
         {
-            var camera = cameras.FirstOrDefault(item => item.CameraId == task.CameraId);
-            Tasks.Add(new VisionTaskListItem(task, camera ?? new VisionCameraConfig { CameraId = task.CameraId, Name = task.CameraId }));
+            var camera = cameras.FirstOrDefault(item => item.CameraId == task.CameraId)
+                         ?? new VisionCameraConfig { CameraId = task.CameraId, Name = task.CameraId };
+            _allTasks.Add(new VisionTaskListItem(task, camera));
         }
-        SelectedTask = Tasks.FirstOrDefault(item => item.Task.TaskId == selectedId) ?? Tasks.FirstOrDefault();
-        DetailText = Tasks.Count == 0 ? "暂无任务，工程师可点击“新增视觉任务”创建检测配方" : $"已加载 {Tasks.Count} 个视觉任务";
+        SelectedCamera = Cameras.FirstOrDefault(item => item.Camera.CameraId == selectedCameraId) ?? Cameras.FirstOrDefault();
+        if (selectedTaskId is not null) SelectedTask = Tasks.FirstOrDefault(item => item.Task.TaskId == selectedTaskId) ?? SelectedTask;
+        if (Cameras.Count == 0) DetailText = "尚未配置相机，请新增视觉任务并完成相机配置";
+    }
+
+    private void FilterTasksForCamera()
+    {
+        var previousTaskId = SelectedTask?.Task.TaskId;
+        Tasks.Clear();
+        if (SelectedCamera is not null)
+        {
+            foreach (var item in _allTasks.Where(item => item.Task.CameraId == SelectedCamera.Camera.CameraId)) Tasks.Add(item);
+        }
+        SelectedTask = Tasks.FirstOrDefault(item => item.Task.TaskId == previousTaskId) ?? Tasks.FirstOrDefault();
+        RaisePropertyChanged(nameof(HasNoRecipe));
+    }
+
+    private async Task ReloadRuntimeAsync()
+    {
+        DetailText = "正在重新加载相机和视觉任务...";
+        await _engine.ReloadAsync();
+        await LoadAsync();
     }
 
     private void OpenTaskDialog(VisionTaskListItem? item)
     {
         var parameters = new DialogParameters();
         if (item is not null) parameters.Add("TaskId", item.Task.TaskId);
-        _dialogService.ShowDialog("VisionTaskDialog", parameters, result => { if (result.Result == ButtonResult.OK) _ = LoadAsync(); });
+        _dialogService.ShowDialog("VisionTaskDialog", parameters, result => { if (result.Result == ButtonResult.OK) _ = ReloadRuntimeAsync(); });
+    }
+
+    private void OpenCameraDialog()
+    {
+        var parameters = new DialogParameters();
+        if (SelectedCamera is not null) parameters.Add("CameraId", SelectedCamera.Camera.CameraId);
+        _dialogService.ShowDialog("VisionCameraDialog", parameters, result => { if (result.Result == ButtonResult.OK) _ = ReloadRuntimeAsync(); });
     }
 
     private void OpenLogin() => _dialogService.ShowDialog("LoginDialog", result =>
@@ -131,14 +206,18 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     private async Task StartAsync()
     {
-        _engine.Resume(); IsPaused = false; DetailText = "正在重新加载视觉任务...";
-        await _engine.ReloadAsync(); DetailText = "视觉检测已启动";
+        if (!CanRunDetection) { DetailText = "需要已连接相机和检测配方才能开始检测"; return; }
+        _engine.Resume(); IsPaused = false; DetailText = "正在启动视觉检测...";
+        await _engine.ReloadAsync();
+        IsCameraConnected = SelectedCamera is not null && _engine.IsCameraConnected(SelectedCamera.Camera.CameraId);
+        DetailText = IsCameraConnected ? "视觉检测已启动" : "相机连接失败，请检查相机配置";
     }
 
     private void TogglePause()
     {
+        if (!CanRunDetection) { DetailText = "需要已连接相机和检测配方才能暂停检测"; return; }
         if (IsPaused) _engine.Resume(); else _engine.Pause();
-        IsPaused = !IsPaused; DetailText = IsPaused ? "视觉检测已暂停" : "视觉检测已继续";
+        IsPaused = !IsPaused; DetailText = IsPaused ? "检测算法已暂停，实时预览继续" : "视觉检测已继续";
     }
 
     private void ResetStatistics()
@@ -150,39 +229,76 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     private async Task TriggerAsync()
     {
-        if (SelectedTask is null) return;
-        DetailText = "正在执行单帧检测...";
-        if (await _engine.TriggerAsync(SelectedTask.Task.CameraId) is null)
-            DetailText = "相机没有可用图片，请检查模拟图片目录";
+        if (!CanUseCamera || SelectedCamera is null) { DetailText = "请先连接并选择相机"; return; }
+        DetailText = SelectedTask is null ? "正在采集单帧预览..." : "正在执行单帧检测...";
+        if (SelectedTask is null)
+        {
+            if (await _engine.TriggerFrameAsync(SelectedCamera.Camera.CameraId) is null) DetailText = "相机未返回图像";
+        }
+        else if (await _engine.TriggerAsync(SelectedCamera.Camera.CameraId) is null) DetailText = "相机未返回图像，请检查连接";
     }
 
-    private void OnInspectionCompleted(object? sender, VisionInspectionCompletedEventArgs e)
+    private void OnFrameReceived(object? sender, VisionFrameReceivedEventArgs args)
     {
+        if (SelectedCamera?.Camera.CameraId != args.Frame.CameraId) return;
         Application.Current?.Dispatcher.Invoke(() =>
         {
-            PreviewImage = Decode(e.Frame.EncodedImage);
-            ResultText = e.Result.IsPass ? "✓ OK · 检测合格" : "✕ NG · 检测不合格";
-            ResultColor = e.Result.IsPass ? "#10B981" : "#EF4444";
-            DetailText = $"匹配分数 {e.Result.MatchScore:F3} · 耗时 {e.Result.ProcessingTimeMilliseconds:F1} ms" +
-                         (string.IsNullOrWhiteSpace(e.Result.FailureReason) ? string.Empty : $" · {e.Result.FailureReason}");
-            FrameInfo = $"图像：{Path.GetFileName(e.Frame.SourcePath) ?? e.Frame.FrameId}   时间：{e.Frame.Timestamp.ToLocalTime():HH:mm:ss.fff}";
-            TotalCount++; if (!e.Result.IsPass) NgCount++;
-            History.Insert(0, new VisionHistoryItem(e.Result, Path.GetFileName(e.Frame.SourcePath) ?? e.Frame.FrameId));
+            PreviewImage = Decode(args.Frame.EncodedImage);
+            FrameInfo = $"图像：{Path.GetFileName(args.Frame.SourcePath) ?? args.Frame.FrameId}   时间：{args.Frame.Timestamp.ToLocalTime():HH:mm:ss.fff}";
+            if (SelectedTask is null)
+            {
+                ResultText = "实时预览"; ResultColor = "#06B6D4";
+                DetailText = "相机实时画面正常；创建配方后可执行检测";
+            }
+        });
+    }
+
+    private void OnInspectionCompleted(object? sender, VisionInspectionCompletedEventArgs args)
+    {
+        if (SelectedTask?.Task.TaskId != args.Result.TaskId) return;
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            ResultText = args.Result.IsPass ? "✓ OK · 检测合格" : "✕ NG · 检测不合格";
+            ResultColor = args.Result.IsPass ? "#10B981" : "#EF4444";
+            DetailText = $"匹配分数 {args.Result.MatchScore:F3} · 耗时 {args.Result.ProcessingTimeMilliseconds:F1} ms" +
+                         (string.IsNullOrWhiteSpace(args.Result.FailureReason) ? string.Empty : $" · {args.Result.FailureReason}");
+            TotalCount++; if (!args.Result.IsPass) NgCount++;
+            History.Insert(0, new VisionHistoryItem(args.Result, Path.GetFileName(args.Frame.SourcePath) ?? args.Frame.FrameId));
             while (History.Count > 200) History.RemoveAt(History.Count - 1);
         });
     }
 
-    private void OnCurrentUserChanged(object? sender, EventArgs e)
+    private void OnCameraStatusChanged(object? sender, VisionCameraStatusEventArgs args)
     {
-        RaisePropertyChanged(nameof(CanModify));
-        RaisePropertyChanged(nameof(CannotModify));
-        AddTaskCommand.RaiseCanExecuteChanged(); ConfigureCommand.RaiseCanExecuteChanged(); ResetCommand.RaiseCanExecuteChanged();
-        LoginToConfigureCommand.RaiseCanExecuteChanged();
+        if (SelectedCamera?.Camera.CameraId != args.CameraId) return;
+        Application.Current?.Dispatcher.Invoke(() => IsCameraConnected = args.IsConnected);
+    }
+
+    private void OnCurrentUserChanged(object? sender, EventArgs args)
+    {
+        RaisePropertyChanged(nameof(CanModify)); RaisePropertyChanged(nameof(CannotModify));
+        RefreshCommands(); LoginToConfigureCommand.RaiseCanExecuteChanged();
+    }
+
+    private void RefreshCommands()
+    {
+        AddTaskCommand.RaiseCanExecuteChanged(); ConfigureCameraCommand.RaiseCanExecuteChanged(); ConfigureCommand.RaiseCanExecuteChanged();
+        TriggerCommand.RaiseCanExecuteChanged(); StartCommand.RaiseCanExecuteChanged(); PauseCommand.RaiseCanExecuteChanged();
+        ResetCommand.RaiseCanExecuteChanged();
     }
 
     private void RaiseMetrics()
     {
-        RaisePropertyChanged(nameof(OkCount)); RaisePropertyChanged(nameof(PassRate)); RaisePropertyChanged(nameof(PassRateText));
+        RaisePropertyChanged(nameof(OkCount));
+        RaisePropertyChanged(nameof(PassRate));
+        RaisePropertyChanged(nameof(PassRateText));
+    }
+
+    private void RaiseCameraDetails()
+    {
+        RaisePropertyChanged(nameof(CameraName)); RaisePropertyChanged(nameof(CameraDriver));
+        RaisePropertyChanged(nameof(ImageDirectory)); RaisePropertyChanged(nameof(FrameInterval));
+        RaisePropertyChanged(nameof(LoopPlayback)); RaisePropertyChanged(nameof(CameraStatusText)); RaisePropertyChanged(nameof(CameraStatusColor));
     }
 
     private void RaiseTaskDetails()
@@ -193,25 +309,29 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
             foreach (var item in SelectedTask.Task.Operators.OrderBy(item => item.Order))
                 CurrentRecipe.Add(new VisionRecipeDisplayItem(item.Order + 1, item.DisplayName, ParameterSummary(item)));
         }
-        RaisePropertyChanged(nameof(CameraName)); RaisePropertyChanged(nameof(ImageDirectory)); RaisePropertyChanged(nameof(FrameInterval));
-        RaisePropertyChanged(nameof(LoopPlayback)); RaisePropertyChanged(nameof(RoiText)); RaisePropertyChanged(nameof(MatchThreshold));
-        RaisePropertyChanged(nameof(TemplatePath)); RaisePropertyChanged(nameof(ResultResourcePath)); RaisePropertyChanged(nameof(AlarmRuleName));
+        RaisePropertyChanged(nameof(HasNoRecipe)); RaisePropertyChanged(nameof(ResultResourcePath)); RaisePropertyChanged(nameof(AlarmRuleName));
     }
 
     private static string Segment(string value) => value.Trim().Replace('/', '-').Replace('\\', '-');
     private static string ParameterSummary(VisionOperatorDefinition item) => item.Parameters.Count == 0
         ? "使用默认配置"
         : string.Join("  ·  ", item.Parameters.Where(pair => !pair.Key.Contains("Path", StringComparison.OrdinalIgnoreCase)).Take(3).Select(pair => $"{pair.Key}={pair.Value}"));
+
     private static BitmapImage Decode(byte[] bytes)
     {
         using var stream = new MemoryStream(bytes);
-        var image = new BitmapImage();
-        image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad; image.StreamSource = stream; image.EndInit(); image.Freeze();
-        return image;
+        var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
     }
 }
 
 public sealed record VisionRecipeDisplayItem(int Order, string Name, string Parameters);
+public sealed class VisionCameraListItem(VisionCameraConfig camera)
+{
+    public VisionCameraConfig Camera { get; } = camera;
+    public string Name => Camera.Name;
+    public string DisplayText => $"{Camera.Name} · {Camera.DriverType}";
+}
 
 public sealed class VisionTaskListItem(VisionInspectionTask task, VisionCameraConfig camera)
 {
@@ -219,7 +339,7 @@ public sealed class VisionTaskListItem(VisionInspectionTask task, VisionCameraCo
     public VisionCameraConfig Camera { get; } = camera;
     public string Name => Task.Name;
     public string CameraName => Camera.Name;
-    public string DisplayText => $"{Task.Name} · {Camera.Name}";
+    public string DisplayText => Task.Name;
 }
 
 public sealed class VisionHistoryItem
