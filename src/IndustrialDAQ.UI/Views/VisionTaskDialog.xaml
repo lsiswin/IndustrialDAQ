@@ -41,19 +41,21 @@
                                 <Rectangle x:Name="TemplateRegion" Stroke="#F59E0B" StrokeThickness="2" Fill="#18F59E0B"/>
                                 <Ellipse x:Name="DragStartMarker" Width="12" Height="12" Fill="#F8FAFC" Stroke="#06B6D4" StrokeThickness="3" Visibility="Collapsed"/>
                             </Canvas>
-                            <!-- 直接绑定框选状态，避免弹窗重复打开后事件订阅失效导致无法拖动。 -->
-                            <Border x:Name="SelectionInputLayer" Background="Transparent" IsHitTestVisible="{Binding IsRegionDrawing}">
-                                <Border.Style>
-                                    <Style TargetType="Border">
+                            <!-- Thumb 原生管理鼠标捕获和拖动生命周期，Canvas 仅负责绘制结果。 -->
+                            <Thumb x:Name="SelectionThumb" IsHitTestVisible="{Binding IsRegionDrawing}"
+                                   DragStarted="OnRegionDragStarted" DragDelta="OnRegionDragDelta" DragCompleted="OnRegionDragCompleted">
+                                <Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="Transparent"/></ControlTemplate></Thumb.Template>
+                                <Thumb.Style>
+                                    <Style TargetType="Thumb">
                                         <Setter Property="Cursor" Value="Arrow"/>
                                         <Style.Triggers><DataTrigger Binding="{Binding IsRegionDrawing}" Value="True"><Setter Property="Cursor" Value="Cross"/></DataTrigger></Style.Triggers>
                                     </Style>
-                                </Border.Style>
-                            </Border>
+                                </Thumb.Style>
+                            </Thumb>
                             <Border Background="#D90E7490" CornerRadius="4" Padding="10,6" Margin="10"
                                     HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"
                                     Visibility="{Binding IsRegionDrawing, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="框选模式：按住鼠标左键拖动，右侧按钮可取消" Foreground="White"/>
+                                <TextBlock Text="框选模式：拖动框选，或单击起点后再单击终点" Foreground="White"/>
                             </Border>
                         </Grid>
                         <TextBlock Grid.Row="2" Text="蓝框：ROI 搜索区域　橙框：模板教学区域" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
