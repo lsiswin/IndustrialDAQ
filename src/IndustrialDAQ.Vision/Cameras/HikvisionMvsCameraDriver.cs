@@ -5,7 +5,7 @@ using IndustrialDAQ.Vision.Models;
 
 namespace IndustrialDAQ.Vision.Cameras;
 
-/// <summary>使用运行时加载的海康 MVS SDK 连接真实或虚拟相机并输出 PNG 图像帧。</summary>
+/// <summary>使用运行时加载的海康 MVS SDK 连接真实或虚拟相机并输出 JPEG 图像帧。</summary>
 public sealed class HikvisionMvsCameraDriver : IVisionCameraDriver
 {
     private readonly VisionCameraConfig _config;
@@ -74,10 +74,13 @@ public sealed class HikvisionMvsCameraDriver : IVisionCameraDriver
             var imageSize = Convert.ToUInt64(ReadProperty(image, "ImageSize"));
             var buffer = new byte[Math.Max(1024 * 1024, checked((int)Math.Min(int.MaxValue, imageSize * 4 + 65536)))];
             var formatInfo = Activator.CreateInstance(_runtime!.RequireType("MvCameraControl.ImageFormatInfo"))!;
-            formatInfo.GetType().GetField("FormatType")!.SetValue(formatInfo, _runtime.EnumValue("MvCameraControl.ImageFormatType", "Png"));
+            formatInfo.GetType().GetField("FormatType")!.SetValue(formatInfo, _runtime.EnumValue("MvCameraControl.ImageFormatType", "Jpeg"));
             formatInfo.GetType().GetField("JpegQuality")!.SetValue(formatInfo, (uint)90);
             var saver = ReadProperty(_device!, "ImageSaver");
-            var saveMethod = saver.GetType().GetMethods().Single(method => method.Name == "SaveImageToBuffer" && method.GetParameters()[0].ParameterType == typeof(byte[]));
+            var saveMethod = saver.GetType().GetMethods().Single(method =>
+                method.Name == "SaveImageToBuffer" &&
+                method.GetParameters()[0].ParameterType == typeof(byte[]) &&
+                method.GetParameters()[1].ParameterType.GetElementType() == typeof(uint));
             object?[] saveArguments = [buffer, (uint)0, image, formatInfo, _runtime.EnumValue("MvCameraControl.CFAMethod", "Fast")];
             EnsureSuccess(saveMethod.Invoke(saver, saveArguments), "转换相机图像");
             var length = checked((int)Convert.ToUInt32(saveArguments[1]));

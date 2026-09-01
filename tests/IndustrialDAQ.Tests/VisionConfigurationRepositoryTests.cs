@@ -17,7 +17,9 @@ public sealed class VisionConfigurationRepositoryTests
 
         await repository.UpsertCameraAsync(new VisionCameraConfig
         {
-            CameraId = "cap-camera", Name = "瓶盖相机", ImageDirectory = "samples", IntervalMilliseconds = 500
+            CameraId = "cap-camera", Name = "瓶盖相机", DriverType = VisionCameraDriverTypes.HikvisionMvs,
+            ImageDirectory = "samples", DeviceSerialNumber = "HIK-VIRTUAL-001", DeviceIpAddress = "192.168.1.88",
+            IntervalMilliseconds = 500
         });
         await repository.UpsertTaskAsync(new VisionInspectionTask
         {
@@ -34,6 +36,9 @@ public sealed class VisionConfigurationRepositoryTests
         var camera = Assert.Single(await repository.LoadCamerasAsync());
         var task = Assert.Single(await repository.LoadTasksAsync());
         Assert.Equal("samples", camera.ImageDirectory);
+        Assert.Equal(VisionCameraDriverTypes.HikvisionMvs, camera.DriverType);
+        Assert.Equal("HIK-VIRTUAL-001", camera.DeviceSerialNumber);
+        Assert.Equal("192.168.1.88", camera.DeviceIpAddress);
         Assert.Equal(0.86, task.MatchThreshold);
         Assert.Equal(0.2, task.Roi.X);
 
