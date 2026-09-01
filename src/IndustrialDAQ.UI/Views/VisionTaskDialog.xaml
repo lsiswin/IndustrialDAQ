@@ -19,13 +19,13 @@
                 <Border Background="{DynamicResource BrushBgSecondary}" CornerRadius="6" Margin="0,0,14,0" Padding="10">
                     <Grid>
                         <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <Grid x:Name="ImageSelectionHost" Background="#111827" SizeChanged="OnImageHostSizeChanged"
-                              PreviewMouseLeftButtonDown="OnImageMouseDown" PreviewMouseMove="OnImageMouseMove" PreviewMouseLeftButtonUp="OnImageMouseUp">
+                        <Grid x:Name="ImageSelectionHost" Background="#111827" SizeChanged="OnImageHostSizeChanged">
                             <TextBlock Text="等待已选相机图像" Foreground="#94A3B8" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
                             <Image x:Name="PreviewImageControl" Source="{Binding PreviewImage}" Stretch="Uniform" IsHitTestVisible="False"/>
                             <Canvas x:Name="RegionOverlay" IsHitTestVisible="False">
                                 <Rectangle x:Name="RoiRegion" Stroke="#22D3EE" StrokeThickness="2" Fill="#1622D3EE"/>
                                 <Rectangle x:Name="TemplateRegion" Stroke="#F59E0B" StrokeThickness="2" Fill="#18F59E0B"/>
+                                <Ellipse x:Name="DragStartMarker" Width="12" Height="12" Fill="#F8FAFC" Stroke="#06B6D4" StrokeThickness="3" Visibility="Collapsed"/>
                             </Canvas>
                             <!-- 直接绑定框选状态，避免弹窗重复打开后事件订阅失效导致无法拖动。 -->
                             <Border x:Name="SelectionInputLayer" Background="Transparent" IsHitTestVisible="{Binding IsRegionDrawing}">

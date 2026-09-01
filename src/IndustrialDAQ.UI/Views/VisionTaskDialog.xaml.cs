@@ -17,6 +17,10 @@ public partial class VisionTaskDialog : UserControl
     public VisionTaskDialog()
     {
         InitializeComponent();
+        // Prism DialogWindow 可能提前处理鼠标事件；handledEventsToo=true 保证框选画布仍能收到输入。
+        ImageSelectionHost.AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(OnImageMouseDown), true);
+        ImageSelectionHost.AddHandler(Mouse.PreviewMouseMoveEvent, new MouseEventHandler(OnImageMouseMove), true);
+        ImageSelectionHost.AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(OnImageMouseUp), true);
         DataContextChanged += OnDataContextChanged;
         Loaded += OnLoaded;
         Unloaded += (_, _) => { if (_viewModel is not null) _viewModel.PropertyChanged -= OnViewModelPropertyChanged; };
@@ -49,6 +53,7 @@ public partial class VisionTaskDialog : UserControl
 
     private void OnImageMouseDown(object sender, MouseButtonEventArgs args)
     {
+        if (args.ChangedButton != MouseButton.Left) return;
         if (_viewModel?.IsRegionDrawing != true) return;
         if (PreviewImageControl.Source is not BitmapSource)
         {
@@ -63,6 +68,7 @@ public partial class VisionTaskDialog : UserControl
         }
         _dragStart = point;
         _viewModel.ReportSelectionIssue("已确定框选起点，请按住左键拖动到区域终点");
+        ShowDragStart(point.Value);
         ImageSelectionHost.CaptureMouse();
         args.Handled = true;
     }
@@ -75,9 +81,11 @@ public partial class VisionTaskDialog : UserControl
 
     private void OnImageMouseUp(object sender, MouseButtonEventArgs args)
     {
+        if (args.ChangedButton != MouseButton.Left) return;
         if (_dragStart is null) return;
         UpdateDraggedRegion(args.GetPosition(ImageSelectionHost));
         _dragStart = null;
+        DragStartMarker.Visibility = Visibility.Collapsed;
         ImageSelectionHost.ReleaseMouseCapture();
         _viewModel?.CompleteRegionSelection();
         args.Handled = true;
@@ -118,6 +126,15 @@ public partial class VisionTaskDialog : UserControl
     }
 
     private void OnImageHostSizeChanged(object sender, SizeChangedEventArgs args) => UpdateRegionOverlays();
+
+    private void ShowDragStart(Point normalizedPoint)
+    {
+        var bounds = GetRenderedImageBounds();
+        if (bounds.IsEmpty) return;
+        DragStartMarker.Visibility = Visibility.Visible;
+        Canvas.SetLeft(DragStartMarker, bounds.Left + normalizedPoint.X * bounds.Width - DragStartMarker.Width / 2);
+        Canvas.SetTop(DragStartMarker, bounds.Top + normalizedPoint.Y * bounds.Height - DragStartMarker.Height / 2);
+    }
 
     private void UpdateRegionOverlays()
     {
