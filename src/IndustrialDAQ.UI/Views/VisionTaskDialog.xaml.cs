@@ -34,11 +34,13 @@ public partial class VisionTaskDialog : UserControl
     {
         if (args.PropertyName is nameof(VisionTaskDialogViewModel.SelectedOperator) or nameof(VisionTaskDialogViewModel.PreviewImage))
             Dispatcher.BeginInvoke(UpdateRegionOverlays);
+        if (args.PropertyName == nameof(VisionTaskDialogViewModel.IsRegionDrawing))
+            Dispatcher.BeginInvoke(UpdateSelectionCursor);
     }
 
     private void OnImageMouseDown(object sender, MouseButtonEventArgs args)
     {
-        if (_viewModel?.CanDrawRegion != true || PreviewImageControl.Source is not BitmapSource) return;
+        if (_viewModel?.IsRegionDrawing != true || PreviewImageControl.Source is not BitmapSource) return;
         var point = ToNormalizedPoint(args.GetPosition(ImageSelectionHost));
         if (point is null) return;
         _dragStart = point;
@@ -58,6 +60,8 @@ public partial class VisionTaskDialog : UserControl
         UpdateDraggedRegion(args.GetPosition(ImageSelectionHost));
         _dragStart = null;
         ImageSelectionHost.ReleaseMouseCapture();
+        _viewModel?.CompleteRegionSelection();
+        UpdateSelectionCursor();
         args.Handled = true;
     }
 
@@ -96,6 +100,9 @@ public partial class VisionTaskDialog : UserControl
     }
 
     private void OnImageHostSizeChanged(object sender, SizeChangedEventArgs args) => UpdateRegionOverlays();
+
+    private void UpdateSelectionCursor() =>
+        ImageSelectionHost.Cursor = _viewModel?.IsRegionDrawing == true ? Cursors.Cross : Cursors.Arrow;
 
     private void UpdateRegionOverlays()
     {

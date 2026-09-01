@@ -43,6 +43,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private int _intervalMilliseconds = 1000;
     private bool _loop = true;
     private bool _saveNgImage = true;
+    private bool _isRegionDrawing;
     private BitmapImage? _previewImage;
     private string _statusText = "选择相机后，按顺序添加视觉算子";
 
@@ -105,14 +106,29 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             MoveDownCommand.RaiseCanExecuteChanged();
             RaisePropertyChanged(nameof(CanDrawRegion));
             RaisePropertyChanged(nameof(SelectionInstruction));
+            IsRegionDrawing = false;
+            StartRegionSelectionCommand.RaiseCanExecuteChanged();
         }
     }
 
     public bool CanDrawRegion => SelectedOperator?.OperatorType is "RoiCrop" or "TemplateMatch";
+    public bool IsRegionDrawing
+    {
+        get => _isRegionDrawing;
+        private set
+        {
+            if (!SetProperty(ref _isRegionDrawing, value)) return;
+            RaisePropertyChanged(nameof(RegionSelectionButtonText));
+            RaisePropertyChanged(nameof(SelectionInstruction));
+        }
+    }
+    public string RegionSelectionButtonText => IsRegionDrawing ? "正在框选，请在左图拖动..." : "▣ 开始框选";
     public string SelectionInstruction => SelectedOperator?.OperatorType switch
     {
-        "RoiCrop" => "在左侧图像拖动鼠标，框选任务搜索区域（蓝框）",
-        "TemplateMatch" => "在左侧图像拖动鼠标，框选需要教学的特征模板（橙框）",
+        "RoiCrop" when IsRegionDrawing => "框选模式已开启：在左侧图像按下并拖动鼠标（蓝框）",
+        "TemplateMatch" when IsRegionDrawing => "框选模式已开启：在左侧图像按下并拖动鼠标（橙框）",
+        "RoiCrop" => "点击右侧“开始框选”，再到左侧图像选择 ROI 搜索区域",
+        "TemplateMatch" => "点击右侧“开始框选”，再到左侧图像选择模板教学区域",
         _ => "当前算子使用右侧标量参数，不需要图像框选"
     };
 
@@ -124,6 +140,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     public DelegateCommand RemoveOperatorCommand { get; }
     public DelegateCommand MoveUpCommand { get; }
     public DelegateCommand MoveDownCommand { get; }
+    public DelegateCommand StartRegionSelectionCommand { get; }
     public DelegateCommand TeachCommand { get; }
     public DelegateCommand SaveCommand { get; }
     public DelegateCommand CancelCommand { get; }
@@ -150,6 +167,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         RemoveOperatorCommand = new DelegateCommand(RemoveOperator, () => SelectedOperator is not null);
         MoveUpCommand = new DelegateCommand(() => MoveOperator(-1), () => SelectedOperator is not null && Operators.IndexOf(SelectedOperator) > 0);
         MoveDownCommand = new DelegateCommand(() => MoveOperator(1), () => SelectedOperator is not null && Operators.IndexOf(SelectedOperator) < Operators.Count - 1);
+        StartRegionSelectionCommand = new DelegateCommand(BeginRegionSelection, () => CanDrawRegion);
         TeachCommand = new DelegateCommand(async () => await TeachAndTestAsync());
         SaveCommand = new DelegateCommand(async () => await SaveAsync());
         CancelCommand = new DelegateCommand(() => RequestClose.Invoke(ButtonResult.Cancel));
@@ -228,6 +246,17 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         SelectedOperator = item;
         StatusText = $"已添加“{item.DisplayName}”，可修改默认参数";
     }
+
+    private void BeginRegionSelection()
+    {
+        if (!CanDrawRegion) return;
+        IsRegionDrawing = true;
+        StatusText = SelectedOperator?.OperatorType == "RoiCrop"
+            ? "请在左侧图片上拖动鼠标框选 ROI 搜索区域"
+            : "请在左侧图片上拖动鼠标框选模板特征区域";
+    }
+
+    public void CompleteRegionSelection() => IsRegionDrawing = false;
 
     private void RemoveOperator()
     {
