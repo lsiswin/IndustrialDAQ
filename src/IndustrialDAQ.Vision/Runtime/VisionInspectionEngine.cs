@@ -21,6 +21,7 @@ public sealed class VisionInspectionEngine : IHostedService
     private readonly ILogger<VisionInspectionEngine> _logger;
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     private readonly ConcurrentDictionary<string, IVisionCameraDriver> _drivers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, VisionFrame> _latestFrames = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _cts;
     private List<Task> _cameraLoops = [];
     private readonly HashSet<string> _registeredTagIds = new(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +53,10 @@ public sealed class VisionInspectionEngine : IHostedService
 
     public bool IsCameraConnected(string cameraId) =>
         _drivers.TryGetValue(cameraId, out var driver) && driver.IsConnected;
+
+    /// <summary>返回运行引擎最近一次收到的快照，配方教学复用该图像，避免重复打开独占相机。</summary>
+    public VisionFrame? GetLatestFrame(string cameraId) =>
+        _latestFrames.TryGetValue(cameraId, out var frame) ? frame : null;
 
     public void Pause() => _isPaused = true;
     public void Resume() => _isPaused = false;
@@ -130,6 +135,7 @@ public sealed class VisionInspectionEngine : IHostedService
         if (!_drivers.TryGetValue(cameraId, out var driver)) return null;
         var frame = await driver.TriggerAsync(cancellationToken);
         if (frame is null) return null;
+        _latestFrames[cameraId] = frame;
         CameraStatusChanged?.Invoke(this, new VisionCameraStatusEventArgs(cameraId, driver.IsConnected));
         FrameReceived?.Invoke(this, new VisionFrameReceivedEventArgs(frame));
         return frame;
@@ -141,6 +147,7 @@ public sealed class VisionInspectionEngine : IHostedService
         {
             await foreach (var frame in driver.CaptureAsync(cancellationToken))
             {
+                _latestFrames[driver.CameraId] = frame;
                 CameraStatusChanged?.Invoke(this, new VisionCameraStatusEventArgs(driver.CameraId, true));
                 FrameReceived?.Invoke(this, new VisionFrameReceivedEventArgs(frame));
                 if (_isPaused) continue;

@@ -12,6 +12,8 @@ namespace IndustrialDAQ.UI.Views;
 public partial class VisionTaskDialog : UserControl
 {
     private Point? _dragStart;
+    private bool _isPointerDragging;
+    private bool _hasDragged;
     private VisionTaskDialogViewModel? _viewModel;
 
     public VisionTaskDialog()
@@ -49,6 +51,8 @@ public partial class VisionTaskDialog : UserControl
     {
         if (args.PropertyName is nameof(VisionTaskDialogViewModel.SelectedOperator) or nameof(VisionTaskDialogViewModel.PreviewImage))
             Dispatcher.BeginInvoke(UpdateRegionOverlays);
+        if (args.PropertyName == nameof(VisionTaskDialogViewModel.IsRegionDrawing) && _viewModel?.IsRegionDrawing != true)
+            Dispatcher.BeginInvoke(ResetSelectionGesture);
     }
 
     private void OnImageMouseDown(object sender, MouseButtonEventArgs args)
@@ -66,7 +70,19 @@ public partial class VisionTaskDialog : UserControl
             _viewModel.ReportSelectionIssue("请在实际图像范围内按下鼠标左键并拖动");
             return;
         }
+        // 第二次单击直接作为终点，兼容不习惯拖动的现场操作人员。
+        if (_dragStart is not null && !_isPointerDragging)
+        {
+            ApplyRegion(_dragStart.Value, point.Value);
+            ResetSelectionGesture();
+            _viewModel.CompleteRegionSelection();
+            args.Handled = true;
+            return;
+        }
+
         _dragStart = point;
+        _isPointerDragging = true;
+        _hasDragged = false;
         _viewModel.ReportSelectionIssue("已确定框选起点，请按住左键拖动到区域终点");
         ShowDragStart(point.Value);
         ImageSelectionHost.CaptureMouse();
@@ -75,30 +91,40 @@ public partial class VisionTaskDialog : UserControl
 
     private void OnImageMouseMove(object sender, MouseEventArgs args)
     {
-        if (_dragStart is null || args.LeftButton != MouseButtonState.Pressed) return;
-        UpdateDraggedRegion(args.GetPosition(ImageSelectionHost));
+        if (_dragStart is null || !_isPointerDragging || args.LeftButton != MouseButtonState.Pressed) return;
+        var end = ToNormalizedPoint(args.GetPosition(ImageSelectionHost), clampToImage: true);
+        if (end is null) return;
+        _hasDragged |= Math.Abs(_dragStart.Value.X - end.Value.X) >= 0.005 || Math.Abs(_dragStart.Value.Y - end.Value.Y) >= 0.005;
+        if (_hasDragged) ApplyRegion(_dragStart.Value, end.Value);
     }
 
     private void OnImageMouseUp(object sender, MouseButtonEventArgs args)
     {
         if (args.ChangedButton != MouseButton.Left) return;
-        if (_dragStart is null) return;
-        UpdateDraggedRegion(args.GetPosition(ImageSelectionHost));
-        _dragStart = null;
-        DragStartMarker.Visibility = Visibility.Collapsed;
+        if (_dragStart is null || !_isPointerDragging) return;
+        var end = ToNormalizedPoint(args.GetPosition(ImageSelectionHost), clampToImage: true);
         ImageSelectionHost.ReleaseMouseCapture();
-        _viewModel?.CompleteRegionSelection();
+        _isPointerDragging = false;
+        if (_hasDragged && end is not null)
+        {
+            ApplyRegion(_dragStart.Value, end.Value);
+            ResetSelectionGesture();
+            _viewModel?.CompleteRegionSelection();
+        }
+        else
+        {
+            _viewModel?.ReportSelectionIssue("起点已保留，请在图像中再次单击区域终点");
+        }
         args.Handled = true;
     }
 
-    private void UpdateDraggedRegion(Point hostPoint)
+    private void ApplyRegion(Point start, Point end)
     {
-        var end = ToNormalizedPoint(hostPoint, clampToImage: true);
-        if (_dragStart is null || end is null || _viewModel is null) return;
-        var left = Math.Min(_dragStart.Value.X, end.Value.X);
-        var top = Math.Min(_dragStart.Value.Y, end.Value.Y);
-        var width = Math.Abs(_dragStart.Value.X - end.Value.X);
-        var height = Math.Abs(_dragStart.Value.Y - end.Value.Y);
+        if (_viewModel is null) return;
+        var left = Math.Min(start.X, end.X);
+        var top = Math.Min(start.Y, end.Y);
+        var width = Math.Abs(start.X - end.X);
+        var height = Math.Abs(start.Y - end.Y);
         if (width < 0.005 || height < 0.005) return;
         _viewModel.SetSelectedRegion(new VisionRoi(left, top, width, height));
         UpdateRegionOverlays();
@@ -134,6 +160,15 @@ public partial class VisionTaskDialog : UserControl
         DragStartMarker.Visibility = Visibility.Visible;
         Canvas.SetLeft(DragStartMarker, bounds.Left + normalizedPoint.X * bounds.Width - DragStartMarker.Width / 2);
         Canvas.SetTop(DragStartMarker, bounds.Top + normalizedPoint.Y * bounds.Height - DragStartMarker.Height / 2);
+    }
+
+    private void ResetSelectionGesture()
+    {
+        _dragStart = null;
+        _isPointerDragging = false;
+        _hasDragged = false;
+        if (ImageSelectionHost.IsMouseCaptured) ImageSelectionHost.ReleaseMouseCapture();
+        DragStartMarker.Visibility = Visibility.Collapsed;
     }
 
     private void UpdateRegionOverlays()

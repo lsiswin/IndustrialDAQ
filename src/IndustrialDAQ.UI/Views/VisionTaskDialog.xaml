@@ -18,9 +18,23 @@
             <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="1.55*"/></Grid.ColumnDefinitions>
                 <Border Background="{DynamicResource BrushBgSecondary}" CornerRadius="6" Margin="0,0,14,0" Padding="10">
                     <Grid>
-                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                        <Grid x:Name="ImageSelectionHost" Background="#111827" SizeChanged="OnImageHostSizeChanged">
-                            <TextBlock Text="等待已选相机图像" Foreground="#94A3B8" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Border Padding="4,2,4,9" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="⟳ 获取相机快照" Command="{Binding RefreshTeachingFrameCommand}"
+                                        Padding="11,6" Background="{DynamicResource InfoBrush}" Foreground="White" BorderThickness="0"/>
+                                <StackPanel>
+                                    <TextBlock Text="教学图与区域框选" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="Bold"/>
+                                    <TextBlock Text="快照固定后再框选，不会受实时画面变化影响" Foreground="{DynamicResource TextMutedBrush}" FontSize="11"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <Grid Grid.Row="1" x:Name="ImageSelectionHost" Background="#111827" SizeChanged="OnImageHostSizeChanged">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                                        Visibility="{Binding HasNoPreviewImage, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="暂无教学图" Foreground="#CBD5E1" FontSize="17" HorizontalAlignment="Center"/>
+                                <TextBlock Text="点击上方“获取相机快照”" Foreground="#94A3B8" Margin="0,5,0,0"/>
+                            </StackPanel>
                             <Image x:Name="PreviewImageControl" Source="{Binding PreviewImage}" Stretch="Uniform" IsHitTestVisible="False"/>
                             <Canvas x:Name="RegionOverlay" IsHitTestVisible="False">
                                 <Rectangle x:Name="RoiRegion" Stroke="#22D3EE" StrokeThickness="2" Fill="#1622D3EE"/>
@@ -42,8 +56,8 @@
                                 <TextBlock Text="框选模式：按住鼠标左键拖动，右侧按钮可取消" Foreground="White"/>
                             </Border>
                         </Grid>
-                        <TextBlock Grid.Row="1" Text="蓝框：ROI 搜索区域　橙框：模板教学区域" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
-                        <TextBlock Grid.Row="2" Text="{Binding SelectionInstruction}" Foreground="{DynamicResource InfoBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                        <TextBlock Grid.Row="2" Text="蓝框：ROI 搜索区域　橙框：模板教学区域" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="3" Text="{Binding SelectionInstruction}" Foreground="{DynamicResource InfoBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,5,0,0"/>
                     </Grid>
                 </Border>
                 <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"><StackPanel Margin="2,0,8,0">

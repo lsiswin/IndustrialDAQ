@@ -55,10 +55,20 @@ public sealed class HikvisionMvsCameraDriver : IVisionCameraDriver
             throw new InvalidOperationException("海康相机配置缺少序列号，请重新自动扫描并选择设备。");
         if (!HikvisionMvsRuntime.TryLoad(out _runtime, out var error)) throw new InvalidOperationException(error);
         _device = _runtime!.CreateDeviceBySerialNumber(_config.DeviceSerialNumber);
-        EnsureSuccess(Invoke(_device, "Open"), "打开相机");
+        EnsureSuccess(OpenDevice(), "打开相机");
         _streamGrabber = ReadProperty(_device, "StreamGrabber");
         EnsureSuccess(Invoke(_streamGrabber, "StartGrabbing"), "启动取流");
         return Task.CompletedTask;
+    }
+
+    private object? OpenDevice()
+    {
+        // 使用控制权限而非默认独占权限；若现有程序允许被切换，再尝试接管控制权。
+        var control = _runtime!.EnumValue("MvCameraControl.DeviceAccessMode", "AccessControl");
+        var result = Invoke(_device, "Open", control, (uint)0);
+        if (Convert.ToInt32(result) != AccessDeniedCode) return result;
+        var controlWithSwitch = _runtime.EnumValue("MvCameraControl.DeviceAccessMode", "AccessControlWithSwitch");
+        return Invoke(_device, "Open", controlWithSwitch, (uint)0);
     }
 
     private VisionFrame? GrabFrame()
@@ -99,6 +109,10 @@ public sealed class HikvisionMvsCameraDriver : IVisionCameraDriver
     private static void EnsureSuccess(object? result, string action)
     {
         var code = Convert.ToInt32(result);
+        if (code == AccessDeniedCode)
+            throw new InvalidOperationException("海康 MVS 相机被其他程序独占（0x80000203）。请先在 MVS 客户端停止取流并关闭设备后重试。");
         if (code != 0) throw new InvalidOperationException($"海康 MVS {action}失败，错误码 0x{code:X8}。");
     }
+
+    private const int AccessDeniedCode = unchecked((int)0x80000203);
 }

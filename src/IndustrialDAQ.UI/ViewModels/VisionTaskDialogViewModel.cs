@@ -35,13 +35,28 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private bool _saveNgImage = true;
     private bool _isRegionDrawing;
     private BitmapImage? _previewImage;
+    private VisionFrame? _teachingFrame;
     private string _statusText = "选择相机后，按顺序添加视觉算子";
 
     public string Title => "配置视觉任务";
     public string TaskName { get => _taskName; set => SetProperty(ref _taskName, value); }
     public string ProductCode { get => _productCode; set => SetProperty(ref _productCode, value); }
     public bool SaveNgImage { get => _saveNgImage; set => SetProperty(ref _saveNgImage, value); }
-    public BitmapImage? PreviewImage { get => _previewImage; private set => SetProperty(ref _previewImage, value); }
+    public BitmapImage? PreviewImage
+    {
+        get => _previewImage;
+        private set
+        {
+            if (!SetProperty(ref _previewImage, value)) return;
+            RaisePropertyChanged(nameof(HasPreviewImage));
+            RaisePropertyChanged(nameof(HasNoPreviewImage));
+            RaisePropertyChanged(nameof(CanStartRegionSelection));
+            RaisePropertyChanged(nameof(SelectionInstruction));
+            StartRegionSelectionCommand.RaiseCanExecuteChanged();
+        }
+    }
+    public bool HasPreviewImage => PreviewImage is not null;
+    public bool HasNoPreviewImage => !HasPreviewImage;
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
     public IReadOnlyList<VisionOperatorDescriptor> AvailableOperators { get; } = VisionOperatorCatalog.Common;
     public ObservableCollection<VisionCameraConfig> ExistingCameras { get; } = [];
@@ -53,6 +68,9 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         set
         {
             if (!SetProperty(ref _selectedCamera, value)) return;
+            _teachingFrame = null;
+            PreviewImage = null;
+            RefreshTeachingFrameCommand.RaiseCanExecuteChanged();
             _ = LoadPreviewAsync();
             StatusText = value is null
                 ? "没有可用相机，请先返回工作台完成相机配置"
@@ -76,6 +94,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             MoveUpCommand.RaiseCanExecuteChanged();
             MoveDownCommand.RaiseCanExecuteChanged();
             RaisePropertyChanged(nameof(CanDrawRegion));
+            RaisePropertyChanged(nameof(CanStartRegionSelection));
             RaisePropertyChanged(nameof(SelectionInstruction));
             IsRegionDrawing = false;
             StartRegionSelectionCommand.RaiseCanExecuteChanged();
@@ -83,6 +102,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     }
 
     public bool CanDrawRegion => SelectedOperator?.OperatorType is "RoiCrop" or "TemplateMatch";
+    public bool CanStartRegionSelection => CanDrawRegion && HasPreviewImage;
     public bool IsRegionDrawing
     {
         get => _isRegionDrawing;
@@ -96,8 +116,9 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     public string RegionSelectionButtonText => IsRegionDrawing ? "✕ 取消框选" : "▣ 开始框选";
     public string SelectionInstruction => SelectedOperator?.OperatorType switch
     {
-        "RoiCrop" when IsRegionDrawing => "框选模式已开启：在左侧图像按下并拖动鼠标（蓝框）",
-        "TemplateMatch" when IsRegionDrawing => "框选模式已开启：在左侧图像按下并拖动鼠标（橙框）",
+        _ when !HasPreviewImage => "请先点击左侧“获取相机快照”，取得教学图后再框选",
+        "RoiCrop" when IsRegionDrawing => "框选模式：按住左键拖动，或依次点击起点和终点（蓝框）",
+        "TemplateMatch" when IsRegionDrawing => "框选模式：按住左键拖动，或依次点击起点和终点（橙框）",
         "RoiCrop" => "点击右侧“开始框选”，再到左侧图像选择 ROI 搜索区域",
         "TemplateMatch" => "点击右侧“开始框选”，再到左侧图像选择模板教学区域",
         _ => "当前算子使用右侧标量参数，不需要图像框选"
@@ -108,6 +129,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     public DelegateCommand MoveUpCommand { get; }
     public DelegateCommand MoveDownCommand { get; }
     public DelegateCommand StartRegionSelectionCommand { get; }
+    public DelegateCommand RefreshTeachingFrameCommand { get; }
     public DelegateCommand TeachCommand { get; }
     public DelegateCommand SaveCommand { get; }
     public DelegateCommand CancelCommand { get; }
@@ -132,7 +154,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         // 移动按钮只依赖是否选中算子，边界由 MoveOperator 处理，避免 Collection.Move 后命令状态卡死。
         MoveUpCommand = new DelegateCommand(() => MoveOperator(-1), () => SelectedOperator is not null);
         MoveDownCommand = new DelegateCommand(() => MoveOperator(1), () => SelectedOperator is not null);
-        StartRegionSelectionCommand = new DelegateCommand(BeginRegionSelection, () => CanDrawRegion);
+        StartRegionSelectionCommand = new DelegateCommand(BeginRegionSelection, () => CanStartRegionSelection);
+        RefreshTeachingFrameCommand = new DelegateCommand(async () => await LoadPreviewAsync(true), () => SelectedCamera is not null);
         TeachCommand = new DelegateCommand(async () => await TeachAndTestAsync());
         SaveCommand = new DelegateCommand(async () => await SaveAsync());
         CancelCommand = new DelegateCommand(() => RequestClose.Invoke(ButtonResult.Cancel));
@@ -389,42 +412,55 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private static string Segment(string value) => value.Trim().Replace('/', '-').Replace('\\', '-');
     private static double Parse(string? value, double fallback) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : fallback;
 
-    private async Task LoadPreviewAsync()
+    private async Task LoadPreviewAsync(bool forceRefresh = false)
     {
         var configuredCamera = SelectedCamera;
-        if (configuredCamera is null) { PreviewImage = null; return; }
+        if (configuredCamera is null) { _teachingFrame = null; PreviewImage = null; return; }
         try
         {
             var path = FirstImage(configuredCamera);
             if (path is not null)
             {
-                PreviewImage = Decode(await File.ReadAllBytesAsync(path));
+                var bytes = await File.ReadAllBytesAsync(path);
+                _teachingFrame = new VisionFrame("teach-" + Guid.NewGuid().ToString("N"), configuredCamera.CameraId,
+                    bytes, DateTimeOffset.UtcNow, path);
+                PreviewImage = Decode(bytes);
+                StatusText = "教学图已加载，可选择 ROI 或模板匹配算子开始框选";
                 return;
             }
 
-            // 硬件相机没有本地目录，直接从已连接的运行时抓取一帧供 ROI 和模板框选。
-            var frame = await _engine.TriggerFrameAsync(configuredCamera.CameraId);
+            // 硬件相机优先复用运行引擎最近帧，避免配方向导创建第二驱动抢占海康相机。
+            var frame = forceRefresh ? null : _engine.GetLatestFrame(configuredCamera.CameraId);
+            frame ??= await _engine.TriggerFrameAsync(configuredCamera.CameraId);
+            _teachingFrame = frame;
             PreviewImage = frame is null ? null : Decode(frame.EncodedImage);
-            if (frame is null) StatusText = "相机尚未返回图像，请确认连接状态后重试";
+            StatusText = frame is null ? "相机尚未返回图像，请确认连接状态后重试" : "已获取相机教学快照，可以开始框选";
         }
         catch (Exception ex)
         {
+            _teachingFrame = null;
             PreviewImage = null;
-            StatusText = "读取相机预览失败：" + ex.Message;
+            StatusText = FriendlyCameraError(ex);
         }
     }
 
     private async Task<VisionFrame> CaptureTeachingFrameAsync()
     {
         var configuredCamera = RequireSelectedCamera();
+        if (_teachingFrame is not null && _teachingFrame.CameraId == configuredCamera.CameraId) return _teachingFrame;
         if (configuredCamera.DriverType != VisionCameraDriverTypes.HikvisionMvs)
         {
             var sample = FirstImage(configuredCamera) ?? throw new InvalidOperationException("已选相机目录中没有 jpg、png 或 bmp 图片。");
             return new VisionFrame("teach-" + Guid.NewGuid().ToString("N"), configuredCamera.CameraId, await File.ReadAllBytesAsync(sample), DateTimeOffset.UtcNow, sample);
         }
-        await using var camera = new IndustrialDAQ.Vision.Cameras.HikvisionMvsCameraDriver(configuredCamera);
-        return await camera.TriggerAsync() ?? throw new InvalidOperationException("海康相机未返回图像，请检查 MVS 模拟相机是否正在取流。");
+        return _engine.GetLatestFrame(configuredCamera.CameraId)
+               ?? await _engine.TriggerFrameAsync(configuredCamera.CameraId)
+               ?? throw new InvalidOperationException("海康相机未返回图像，请先获取教学快照。");
     }
+
+    private static string FriendlyCameraError(Exception exception) => exception.GetBaseException().Message.Contains("0x80000203", StringComparison.OrdinalIgnoreCase)
+        ? "海康相机当前被 MVS 客户端或其他程序占用（0x80000203）。请先在 MVS 中停止取流并关闭设备，再点击“获取相机快照”。"
+        : "读取相机教学图失败：" + exception.GetBaseException().Message;
 
     private VisionCameraConfig RequireSelectedCamera() => SelectedCamera
         ?? throw new InvalidOperationException("请先选择一个已配置相机；若列表为空，请返回工作台新增相机。");
