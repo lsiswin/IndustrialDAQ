@@ -196,6 +196,8 @@ public partial class App : PrismApplication
                 EnsureTemplateTablesExist(db);
                 EnsureSecuritySchema(db);
             }
+            // 所有数据库提供程序统一初始化安全数据，解决 PostgreSQL 首次运行没有管理员的问题。
+            SecurityBootstrapper.Ensure(db);
         }
 
         // ── 初始化内置设备模板（首次运行时写入数据库）──
