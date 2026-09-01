@@ -11,7 +11,7 @@ using Prism.Mvvm;
 
 namespace IndustrialDAQ.UI.ViewModels;
 
-/// <summary>瓶盖有无检测工作台，按设计图组织实时图像、配置、指标和检测历史。</summary>
+/// <summary>通用视觉检测工作台，展示实时图像、任务配方、指标和检测历史。</summary>
 public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 {
     private readonly IVisionConfigurationRepository _repository;
@@ -23,7 +23,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     private BitmapImage? _previewImage;
     private string _resultText = "等待检测";
     private string _resultColor = "#94A3B8";
-    private string _detailText = "请选择或新增瓶盖检测任务";
+    private string _detailText = "请选择或新增视觉任务";
     private string _frameInfo = "尚未接收图像";
     private long _totalCount;
     private long _ngCount;
@@ -31,6 +31,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     public ObservableCollection<VisionTaskListItem> Tasks { get; } = [];
     public ObservableCollection<VisionHistoryItem> History { get; } = [];
+    public ObservableCollection<VisionRecipeDisplayItem> CurrentRecipe { get; } = [];
     public bool CanModify => _authManager.CanModify;
     public bool CannotModify => !CanModify;
     public BitmapImage? PreviewImage { get => _previewImage; private set => SetProperty(ref _previewImage, value); }
@@ -65,8 +66,8 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public string RoiText => SelectedTask is null ? "—" : $"X {SelectedTask.Task.Roi.X:P0}  Y {SelectedTask.Task.Roi.Y:P0}  W {SelectedTask.Task.Roi.Width:P0}  H {SelectedTask.Task.Roi.Height:P0}";
     public double MatchThreshold => SelectedTask?.Task.MatchThreshold ?? 0;
     public string TemplatePath => SelectedTask?.Task.TemplateImagePath ?? "—";
-    public string ResultResourcePath => SelectedTask is null ? "—" : $"Vision/{Segment(SelectedTask.CameraName)}/{Segment(SelectedTask.Task.Name)}/Result/CapPresent";
-    public string AlarmRuleName => SelectedTask is null ? "—" : $"VISION_CAP_MISSING_{SelectedTask.Task.TaskId.ToUpperInvariant()}";
+    public string ResultResourcePath => SelectedTask is null ? "—" : $"Vision/{Segment(SelectedTask.CameraName)}/{Segment(SelectedTask.Task.Name)}/Result/Pass";
+    public string AlarmRuleName => SelectedTask is null ? "—" : $"VISION_TASK_NG_{SelectedTask.Task.TaskId.ToUpperInvariant()}";
 
     public DelegateCommand AddTaskCommand { get; }
     public DelegateCommand ConfigureCommand { get; }
@@ -113,7 +114,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
             Tasks.Add(new VisionTaskListItem(task, camera ?? new VisionCameraConfig { CameraId = task.CameraId, Name = task.CameraId }));
         }
         SelectedTask = Tasks.FirstOrDefault(item => item.Task.TaskId == selectedId) ?? Tasks.FirstOrDefault();
-        DetailText = Tasks.Count == 0 ? "暂无任务，工程师可点击“新增瓶盖检测”完成模板教学" : $"已加载 {Tasks.Count} 个视觉任务";
+        DetailText = Tasks.Count == 0 ? "暂无任务，工程师可点击“新增视觉任务”创建检测配方" : $"已加载 {Tasks.Count} 个视觉任务";
     }
 
     private void OpenTaskDialog(VisionTaskListItem? item)
@@ -125,7 +126,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     private void OpenLogin() => _dialogService.ShowDialog("LoginDialog", result =>
     {
-        if (result.Result == ButtonResult.OK) DetailText = "登录成功，现在可以新增或配置瓶盖检测任务";
+        if (result.Result == ButtonResult.OK) DetailText = "登录成功，现在可以新增或配置视觉任务";
     });
 
     private async Task StartAsync()
@@ -160,7 +161,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         Application.Current?.Dispatcher.Invoke(() =>
         {
             PreviewImage = Decode(e.Frame.EncodedImage);
-            ResultText = e.Result.IsPass ? "✓ OK · 瓶盖存在" : "✕ NG · 瓶盖缺失";
+            ResultText = e.Result.IsPass ? "✓ OK · 检测合格" : "✕ NG · 检测不合格";
             ResultColor = e.Result.IsPass ? "#10B981" : "#EF4444";
             DetailText = $"匹配分数 {e.Result.MatchScore:F3} · 耗时 {e.Result.ProcessingTimeMilliseconds:F1} ms" +
                          (string.IsNullOrWhiteSpace(e.Result.FailureReason) ? string.Empty : $" · {e.Result.FailureReason}");
@@ -186,12 +187,21 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     private void RaiseTaskDetails()
     {
+        CurrentRecipe.Clear();
+        if (SelectedTask is not null)
+        {
+            foreach (var item in SelectedTask.Task.Operators.OrderBy(item => item.Order))
+                CurrentRecipe.Add(new VisionRecipeDisplayItem(item.Order + 1, item.DisplayName, ParameterSummary(item)));
+        }
         RaisePropertyChanged(nameof(CameraName)); RaisePropertyChanged(nameof(ImageDirectory)); RaisePropertyChanged(nameof(FrameInterval));
         RaisePropertyChanged(nameof(LoopPlayback)); RaisePropertyChanged(nameof(RoiText)); RaisePropertyChanged(nameof(MatchThreshold));
         RaisePropertyChanged(nameof(TemplatePath)); RaisePropertyChanged(nameof(ResultResourcePath)); RaisePropertyChanged(nameof(AlarmRuleName));
     }
 
     private static string Segment(string value) => value.Trim().Replace('/', '-').Replace('\\', '-');
+    private static string ParameterSummary(VisionOperatorDefinition item) => item.Parameters.Count == 0
+        ? "使用默认配置"
+        : string.Join("  ·  ", item.Parameters.Where(pair => !pair.Key.Contains("Path", StringComparison.OrdinalIgnoreCase)).Take(3).Select(pair => $"{pair.Key}={pair.Value}"));
     private static BitmapImage Decode(byte[] bytes)
     {
         using var stream = new MemoryStream(bytes);
@@ -200,6 +210,8 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         return image;
     }
 }
+
+public sealed record VisionRecipeDisplayItem(int Order, string Name, string Parameters);
 
 public sealed class VisionTaskListItem(VisionInspectionTask task, VisionCameraConfig camera)
 {
@@ -223,7 +235,7 @@ public sealed class VisionHistoryItem
     public VisionHistoryItem(VisionInspectionResult result, string imageName)
     {
         Timestamp = result.Timestamp.ToLocalTime(); ImageName = imageName;
-        ResultText = result.IsPass ? "OK · 存在" : "NG · 缺失";
+        ResultText = result.IsPass ? "OK · 合格" : "NG · 不合格";
         ResultColor = result.IsPass ? "#10B981" : "#EF4444";
         Score = result.MatchScore; Elapsed = result.ProcessingTimeMilliseconds;
         AlarmText = result.IsPass ? "—" : "已触发"; ImagePath = result.ImagePath;
