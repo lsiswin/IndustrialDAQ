@@ -10,7 +10,6 @@ using IndustrialDAQ.Vision.Abstractions;
 using IndustrialDAQ.Vision.Algorithms;
 using IndustrialDAQ.Vision.Models;
 using IndustrialDAQ.Vision.Runtime;
-using Microsoft.Win32;
 using Prism.Commands;
 using Prism.Mvvm;
 
@@ -21,7 +20,6 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
 {
     private readonly IVisionConfigurationRepository _repository;
     private readonly VisionTemplateTeachingService _teachingService;
-    private readonly IHikvisionCameraDiscoveryService _hikvisionDiscovery;
     private readonly IVisionInspectionAlgorithm _pipelineAlgorithm;
     private readonly VisionInspectionEngine _engine;
     private readonly IAlarmDefinitionRepository _alarmRepository;
@@ -29,63 +27,36 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private readonly IAuthManager _authManager;
     private readonly SecurityAuditService _audit;
     private string _taskId = "vision-task-" + Guid.NewGuid().ToString("N")[..8];
-    private string _cameraId = "vision-camera-" + Guid.NewGuid().ToString("N")[..8];
-    private string _cameraName = "模拟视觉相机";
     private string _taskName = "瓶盖有无检测";
     private string _productCode = "VISION-001";
-    private string _imageDirectory = string.Empty;
-    private string _deviceSerialNumber = string.Empty;
-    private string _deviceIpAddress = string.Empty;
-    private VisionCameraSourceOption _selectedCameraSource = CameraSourceOptions.All[1];
-    private HikvisionCameraCandidate? _selectedDiscoveredCamera;
+    private VisionCameraConfig? _selectedCamera;
     private VisionOperatorDescriptor? _selectedAvailableOperator;
     private VisionOperatorEditorItem? _selectedOperator;
-    private int _intervalMilliseconds = 1000;
-    private bool _loop = true;
     private bool _saveNgImage = true;
     private bool _isRegionDrawing;
     private BitmapImage? _previewImage;
     private string _statusText = "选择相机后，按顺序添加视觉算子";
 
     public string Title => "配置视觉任务";
-    public string CameraName { get => _cameraName; set => SetProperty(ref _cameraName, value); }
     public string TaskName { get => _taskName; set => SetProperty(ref _taskName, value); }
     public string ProductCode { get => _productCode; set => SetProperty(ref _productCode, value); }
-    public string ImageDirectory { get => _imageDirectory; set => SetProperty(ref _imageDirectory, value); }
-    public int IntervalMilliseconds { get => _intervalMilliseconds; set => SetProperty(ref _intervalMilliseconds, value); }
-    public bool Loop { get => _loop; set => SetProperty(ref _loop, value); }
     public bool SaveNgImage { get => _saveNgImage; set => SetProperty(ref _saveNgImage, value); }
     public BitmapImage? PreviewImage { get => _previewImage; private set => SetProperty(ref _previewImage, value); }
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
-    public IReadOnlyList<VisionCameraSourceOption> CameraSources { get; } = CameraSourceOptions.All;
     public IReadOnlyList<VisionOperatorDescriptor> AvailableOperators { get; } = VisionOperatorCatalog.Common;
-    public ObservableCollection<HikvisionCameraCandidate> DiscoveredCameras { get; } = [];
+    public ObservableCollection<VisionCameraConfig> ExistingCameras { get; } = [];
     public ObservableCollection<VisionOperatorEditorItem> Operators { get; } = [];
 
-    public VisionCameraSourceOption SelectedCameraSource
+    public VisionCameraConfig? SelectedCamera
     {
-        get => _selectedCameraSource;
+        get => _selectedCamera;
         set
         {
-            if (!SetProperty(ref _selectedCameraSource, value)) return;
-            RaisePropertyChanged(nameof(UsesDirectorySource));
-            RaisePropertyChanged(nameof(UsesHikvisionMvs));
-            StatusText = value.DriverType == VisionCameraDriverTypes.HikvisionMvs
-                ? "点击“自动扫描”，发现真实或 MVS 虚拟海康相机"
-                : "选择图片目录，系统将按文件名顺序模拟相机取流";
-        }
-    }
-
-    public HikvisionCameraCandidate? SelectedDiscoveredCamera
-    {
-        get => _selectedDiscoveredCamera;
-        set
-        {
-            if (!SetProperty(ref _selectedDiscoveredCamera, value) || value is null) return;
-            _deviceSerialNumber = value.SerialNumber;
-            _deviceIpAddress = value.IpAddress;
-            CameraName = value.DisplayName;
-            StatusText = $"已选择{(value.IsVirtual ? "海康虚拟" : "海康")}相机：{value.DisplayText}";
+            if (!SetProperty(ref _selectedCamera, value)) return;
+            _ = LoadPreviewAsync();
+            StatusText = value is null
+                ? "没有可用相机，请先返回工作台完成相机配置"
+                : $"已选择相机“{value.Name}”，可继续配置视觉算子";
         }
     }
 
@@ -132,10 +103,6 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         _ => "当前算子使用右侧标量参数，不需要图像框选"
     };
 
-    public bool UsesDirectorySource => SelectedCameraSource.DriverType != VisionCameraDriverTypes.HikvisionMvs;
-    public bool UsesHikvisionMvs => SelectedCameraSource.DriverType == VisionCameraDriverTypes.HikvisionMvs;
-    public DelegateCommand BrowseCommand { get; }
-    public DelegateCommand ScanHikvisionCommand { get; }
     public DelegateCommand AddOperatorCommand { get; }
     public DelegateCommand RemoveOperatorCommand { get; }
     public DelegateCommand MoveUpCommand { get; }
@@ -147,22 +114,19 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     public DialogCloseListener RequestClose { get; }
 
     public VisionTaskDialogViewModel(IVisionConfigurationRepository repository,
-        VisionTemplateTeachingService teachingService, IHikvisionCameraDiscoveryService hikvisionDiscovery,
+        VisionTemplateTeachingService teachingService,
         IEnumerable<IVisionInspectionAlgorithm> algorithms, VisionInspectionEngine engine,
         IAlarmDefinitionRepository alarmRepository, IRuleEngineService ruleEngine,
         IAuthManager authManager, SecurityAuditService audit)
     {
         _repository = repository;
         _teachingService = teachingService;
-        _hikvisionDiscovery = hikvisionDiscovery;
         _pipelineAlgorithm = algorithms.First(item => item.AlgorithmType == VisionOperatorPipelineAlgorithm.TypeName);
         _engine = engine;
         _alarmRepository = alarmRepository;
         _ruleEngine = ruleEngine;
         _authManager = authManager;
         _audit = audit;
-        BrowseCommand = new DelegateCommand(Browse);
-        ScanHikvisionCommand = new DelegateCommand(async () => await ScanHikvisionAsync());
         AddOperatorCommand = new DelegateCommand(AddOperator, () => SelectedAvailableOperator is not null);
         RemoveOperatorCommand = new DelegateCommand(RemoveOperator, () => SelectedOperator is not null);
         // 移动按钮只依赖是否选中算子，边界由 MoveOperator 处理，避免 Collection.Move 后命令状态卡死。
@@ -180,27 +144,26 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
 
     public async void OnDialogOpened(IDialogParameters parameters)
     {
-        if (!parameters.TryGetValue("TaskId", out string? taskId) || string.IsNullOrWhiteSpace(taskId)) return;
+        // 视觉任务只引用相机配置，避免向导内重复维护连接参数。
+        var cameras = await _repository.LoadCamerasAsync();
+        ExistingCameras.Clear();
+        foreach (var camera in cameras.Where(item => item.IsEnabled)) ExistingCameras.Add(camera);
+
+        if (!parameters.TryGetValue("TaskId", out string? taskId) || string.IsNullOrWhiteSpace(taskId))
+        {
+            SelectedCamera = ExistingCameras.FirstOrDefault();
+            if (SelectedCamera is null) StatusText = "尚未配置相机，请先关闭窗口并点击“相机配置”";
+            return;
+        }
+
         var task = (await _repository.LoadTasksAsync()).FirstOrDefault(item => item.TaskId == taskId);
         if (task is null) return;
-        var camera = (await _repository.LoadCamerasAsync()).FirstOrDefault(item => item.CameraId == task.CameraId);
         _taskId = task.TaskId;
-        _cameraId = task.CameraId;
         TaskName = task.Name;
         ProductCode = task.ProductCode;
         SaveNgImage = task.SaveNgImage;
         LoadOperators(task);
-        if (camera is not null)
-        {
-            CameraName = camera.Name;
-            ImageDirectory = camera.ImageDirectory;
-            _deviceSerialNumber = camera.DeviceSerialNumber;
-            _deviceIpAddress = camera.DeviceIpAddress;
-            SelectedCameraSource = CameraSources.FirstOrDefault(item => item.DriverType == camera.DriverType) ?? CameraSources[0];
-            IntervalMilliseconds = camera.IntervalMilliseconds;
-            Loop = camera.Loop;
-        }
-        LoadPreview();
+        SelectedCamera = ExistingCameras.FirstOrDefault(item => item.CameraId == task.CameraId);
         StatusText = "已加载当前任务配方，可调整算子参数和执行顺序";
     }
 
@@ -292,29 +255,6 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         MoveDownCommand.RaiseCanExecuteChanged();
     }
 
-    private void Browse()
-    {
-        var dialog = new OpenFolderDialog { Title = "选择视觉检测样图目录", Multiselect = false };
-        if (dialog.ShowDialog() != true) return;
-        ImageDirectory = dialog.FolderName;
-        LoadPreview();
-        StatusText = "目录已选择，可采集模板并测试当前配方";
-    }
-
-    private async Task ScanHikvisionAsync()
-    {
-        try
-        {
-            StatusText = "正在调用海康 MVS SDK 扫描 GigE、USB 和虚拟相机...";
-            var cameras = await _hikvisionDiscovery.ScanAsync();
-            DiscoveredCameras.Clear();
-            foreach (var camera in cameras) DiscoveredCameras.Add(camera);
-            SelectedDiscoveredCamera = cameras.FirstOrDefault(item => item.IsVirtual) ?? cameras.FirstOrDefault();
-            StatusText = cameras.Count == 0 ? "未发现海康相机，请在 MVS 中启动模拟相机后重试。" : $"扫描完成，共发现 {cameras.Count} 台相机。";
-        }
-        catch (Exception ex) { StatusText = "扫描失败：" + ex.Message; }
-    }
-
     private async Task TeachAndTestAsync()
     {
         try
@@ -349,9 +289,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
                 if (!File.Exists(template.ParameterValue("TemplatePath")))
                     throw new InvalidOperationException("配方包含模板匹配，请先点击“采集模板并测试”。");
             }
-            var camera = BuildCamera();
+            var camera = RequireSelectedCamera();
             var task = BuildTask();
-            await _repository.UpsertCameraAsync(camera);
             await _repository.UpsertTaskAsync(task);
             await _engine.ReloadAsync();
             await ProvisionAlarmAsync(camera, task);
@@ -380,22 +319,15 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         await _ruleEngine.ReloadAsync();
     }
 
-    private VisionCameraConfig BuildCamera() => new()
-    {
-        CameraId = _cameraId, Name = CameraName.Trim(), DriverType = SelectedCameraSource.DriverType,
-        ImageDirectory = ImageDirectory.Trim(), IntervalMilliseconds = IntervalMilliseconds,
-        DeviceSerialNumber = _deviceSerialNumber, DeviceIpAddress = _deviceIpAddress,
-        Loop = Loop, TriggerMode = VisionTriggerMode.Continuous, IsEnabled = true
-    };
-
     private VisionInspectionTask BuildTask()
     {
+        var camera = RequireSelectedCamera();
         var definitions = Operators.Select((item, index) => item.ToDefinition(index)).ToArray();
         var template = definitions.FirstOrDefault(item => item.OperatorType == "TemplateMatch");
         var threshold = template is null ? 0.8 : Parse(template.Parameters.GetValueOrDefault("MinScore"), 0.8);
         return new VisionInspectionTask
         {
-            TaskId = _taskId, CameraId = _cameraId, Name = TaskName.Trim(), ProductCode = ProductCode.Trim(),
+            TaskId = _taskId, CameraId = camera.CameraId, Name = TaskName.Trim(), ProductCode = ProductCode.Trim(),
             AlgorithmType = VisionOperatorPipelineAlgorithm.TypeName, Operators = definitions,
             Roi = RecipeRoi(), MatchThreshold = threshold,
             TemplateImagePath = template?.Parameters.GetValueOrDefault("TemplatePath") ?? string.Empty,
@@ -455,25 +387,48 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private static string Segment(string value) => value.Trim().Replace('/', '-').Replace('\\', '-');
     private static double Parse(string? value, double fallback) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : fallback;
 
-    private void LoadPreview()
+    private async Task LoadPreviewAsync()
     {
-        var path = FirstImage();
-        if (path is not null) PreviewImage = Decode(File.ReadAllBytes(path));
+        var configuredCamera = SelectedCamera;
+        if (configuredCamera is null) { PreviewImage = null; return; }
+        try
+        {
+            var path = FirstImage(configuredCamera);
+            if (path is not null)
+            {
+                PreviewImage = Decode(await File.ReadAllBytesAsync(path));
+                return;
+            }
+
+            // 硬件相机没有本地目录，直接从已连接的运行时抓取一帧供 ROI 和模板框选。
+            var frame = await _engine.TriggerFrameAsync(configuredCamera.CameraId);
+            PreviewImage = frame is null ? null : Decode(frame.EncodedImage);
+            if (frame is null) StatusText = "相机尚未返回图像，请确认连接状态后重试";
+        }
+        catch (Exception ex)
+        {
+            PreviewImage = null;
+            StatusText = "读取相机预览失败：" + ex.Message;
+        }
     }
 
     private async Task<VisionFrame> CaptureTeachingFrameAsync()
     {
-        if (UsesDirectorySource)
+        var configuredCamera = RequireSelectedCamera();
+        if (configuredCamera.DriverType != VisionCameraDriverTypes.HikvisionMvs)
         {
-            var sample = FirstImage() ?? throw new InvalidOperationException("目录中没有 jpg、png 或 bmp 图片。");
-            return new VisionFrame("teach-" + Guid.NewGuid().ToString("N"), _cameraId, await File.ReadAllBytesAsync(sample), DateTimeOffset.UtcNow, sample);
+            var sample = FirstImage(configuredCamera) ?? throw new InvalidOperationException("已选相机目录中没有 jpg、png 或 bmp 图片。");
+            return new VisionFrame("teach-" + Guid.NewGuid().ToString("N"), configuredCamera.CameraId, await File.ReadAllBytesAsync(sample), DateTimeOffset.UtcNow, sample);
         }
-        await using var camera = new IndustrialDAQ.Vision.Cameras.HikvisionMvsCameraDriver(BuildCamera());
+        await using var camera = new IndustrialDAQ.Vision.Cameras.HikvisionMvsCameraDriver(configuredCamera);
         return await camera.TriggerAsync() ?? throw new InvalidOperationException("海康相机未返回图像，请检查 MVS 模拟相机是否正在取流。");
     }
 
-    private string? FirstImage() => Directory.Exists(ImageDirectory)
-        ? Directory.EnumerateFiles(ImageDirectory).Where(path => new[] { ".jpg", ".jpeg", ".png", ".bmp" }.Contains(Path.GetExtension(path).ToLowerInvariant())).OrderBy(path => path).FirstOrDefault()
+    private VisionCameraConfig RequireSelectedCamera() => SelectedCamera
+        ?? throw new InvalidOperationException("请先选择一个已配置相机；若列表为空，请返回工作台新增相机。");
+
+    private static string? FirstImage(VisionCameraConfig? camera) => camera is not null && Directory.Exists(camera.ImageDirectory)
+        ? Directory.EnumerateFiles(camera.ImageDirectory).Where(path => new[] { ".jpg", ".jpeg", ".png", ".bmp" }.Contains(Path.GetExtension(path).ToLowerInvariant())).OrderBy(path => path).FirstOrDefault()
         : null;
 
     private static BitmapImage Decode(byte[] bytes)

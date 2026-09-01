@@ -17,15 +17,44 @@
             </Grid>
             <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="0.85*"/><ColumnDefinition Width="1.55*"/></Grid.ColumnDefinitions>
                 <Border Background="{DynamicResource BrushBgSecondary}" CornerRadius="6" Margin="0,0,14,0" Padding="10">
-                    <Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><Grid x:Name="ImageSelectionHost" Background="#111827" SizeChanged="OnImageHostSizeChanged"><TextBlock Text="等待相机图像" Foreground="#94A3B8" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/><Image x:Name="PreviewImageControl" Source="{Binding PreviewImage}" Stretch="Uniform" IsHitTestVisible="False"/><Canvas x:Name="RegionOverlay" IsHitTestVisible="False"><Rectangle x:Name="RoiRegion" Stroke="#22D3EE" StrokeThickness="2" Fill="#1622D3EE"/><Rectangle x:Name="TemplateRegion" Stroke="#F59E0B" StrokeThickness="2" Fill="#18F59E0B"/></Canvas><Border x:Name="SelectionInputLayer" Background="Transparent" IsHitTestVisible="False" MouseLeftButtonDown="OnImageMouseDown" MouseMove="OnImageMouseMove" MouseLeftButtonUp="OnImageMouseUp"/></Grid><TextBlock Grid.Row="1" Text="蓝框：ROI 搜索区域　橙框：模板教学区域" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/><TextBlock Grid.Row="2" Text="{Binding SelectionInstruction}" Foreground="{DynamicResource InfoBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,5,0,0"/></Grid>
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <Grid x:Name="ImageSelectionHost" Background="#111827" SizeChanged="OnImageHostSizeChanged">
+                            <TextBlock Text="等待已选相机图像" Foreground="#94A3B8" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                            <Image x:Name="PreviewImageControl" Source="{Binding PreviewImage}" Stretch="Uniform" IsHitTestVisible="False"/>
+                            <Canvas x:Name="RegionOverlay" IsHitTestVisible="False">
+                                <Rectangle x:Name="RoiRegion" Stroke="#22D3EE" StrokeThickness="2" Fill="#1622D3EE"/>
+                                <Rectangle x:Name="TemplateRegion" Stroke="#F59E0B" StrokeThickness="2" Fill="#18F59E0B"/>
+                            </Canvas>
+                            <!-- 直接绑定框选状态，避免弹窗重复打开后事件订阅失效导致无法拖动。 -->
+                            <Border x:Name="SelectionInputLayer" Background="Transparent"
+                                    IsHitTestVisible="{Binding IsRegionDrawing}"
+                                    MouseLeftButtonDown="OnImageMouseDown" MouseMove="OnImageMouseMove" MouseLeftButtonUp="OnImageMouseUp">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Cursor" Value="Arrow"/>
+                                        <Style.Triggers><DataTrigger Binding="{Binding IsRegionDrawing}" Value="True"><Setter Property="Cursor" Value="Cross"/></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                            </Border>
+                            <Border Background="#D90E7490" CornerRadius="4" Padding="10,6" Margin="10"
+                                    HorizontalAlignment="Left" VerticalAlignment="Top" IsHitTestVisible="False"
+                                    Visibility="{Binding IsRegionDrawing, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="框选模式：按住鼠标左键拖动，右侧按钮可取消" Foreground="White"/>
+                            </Border>
+                        </Grid>
+                        <TextBlock Grid.Row="1" Text="蓝框：ROI 搜索区域　橙框：模板教学区域" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                        <TextBlock Grid.Row="2" Text="{Binding SelectionInstruction}" Foreground="{DynamicResource InfoBrush}" TextWrapping="Wrap" HorizontalAlignment="Center" Margin="0,5,0,0"/>
+                    </Grid>
                 </Border>
                 <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"><StackPanel Margin="2,0,8,0">
-                    <TextBlock Text="① 相机与任务" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,8"/>
-                    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel Margin="0,0,5,0"><TextBlock Text="相机来源"/><ComboBox ItemsSource="{Binding CameraSources}" SelectedItem="{Binding SelectedCameraSource}" DisplayMemberPath="DisplayName" Padding="7" Margin="0,4,0,8"/></StackPanel><StackPanel Grid.Column="1" Margin="5,0,0,0"><TextBlock Text="相机名称"/><TextBox Text="{Binding CameraName, UpdateSourceTrigger=PropertyChanged}" Padding="7" Margin="0,4,0,8"/></StackPanel></Grid>
+                    <TextBlock Text="① 选择已有相机与任务信息" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,8"/>
+                    <TextBlock Text="相机连接参数统一在工作台的“相机配置”中维护，此处只选择任务使用的相机。" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,7"/>
+                    <TextBlock Text="已配置相机" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <ComboBox ItemsSource="{Binding ExistingCameras}" SelectedItem="{Binding SelectedCamera}" Padding="8" Margin="0,4,0,8">
+                        <ComboBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextPrimaryBrush}" FontWeight="SemiBold"/><TextBlock Text="  ·  " Foreground="{DynamicResource TextMutedBrush}"/><TextBlock Text="{Binding DriverType}" Foreground="{DynamicResource TextMutedBrush}"/></StackPanel></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
                     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel Margin="0,0,5,0"><TextBlock Text="任务名称"/><TextBox Text="{Binding TaskName}" Padding="7" Margin="0,4,0,8"/></StackPanel><StackPanel Grid.Column="1" Margin="5,0,0,0"><TextBlock Text="产品编码"/><TextBox Text="{Binding ProductCode}" Padding="7" Margin="0,4,0,8"/></StackPanel></Grid>
-                    <StackPanel Visibility="{Binding UsesDirectorySource, Converter={StaticResource BoolToVisibility}}"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox Text="{Binding ImageDirectory}" IsReadOnly="True" Padding="7"/><Button Grid.Column="1" Content="选择样图目录" Command="{Binding BrowseCommand}" Padding="12,7" Margin="8,0,0,0"/></Grid></StackPanel>
-                    <StackPanel Visibility="{Binding UsesHikvisionMvs, Converter={StaticResource BoolToVisibility}}"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ComboBox ItemsSource="{Binding DiscoveredCameras}" SelectedItem="{Binding SelectedDiscoveredCamera}" DisplayMemberPath="DisplayText" Padding="7"/><Button Grid.Column="1" Content="自动扫描海康相机" Command="{Binding ScanHikvisionCommand}" Padding="12,7" Margin="8,0,0,0"/></Grid></StackPanel>
-                    <Grid Margin="0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="帧间隔 ms"/><TextBox Text="{Binding IntervalMilliseconds}" Padding="7" Margin="0,4,5,0"/></StackPanel><CheckBox Grid.Column="1" Content="循环采集" IsChecked="{Binding Loop}" VerticalAlignment="Bottom" Margin="12,0,0,8"/></Grid>
                     <Separator Margin="0,8"/>
                     <TextBlock Text="② 顺序式视觉配方" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,6"/>
                     <TextBlock Text="不需要拖拽：从常用算子库选择后逐个添加，系统按列表从上到下执行。" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,8"/>

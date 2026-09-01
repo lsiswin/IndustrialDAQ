@@ -95,7 +95,8 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     }
 
     public bool CanUseCamera => SelectedCamera is not null && IsCameraConnected;
-    public bool CanRunDetection => CanUseCamera && SelectedTask is not null;
+    // 相机连接后即可控制取流；没有配方时只做实时预览，不执行检测算法。
+    public bool CanRunDetection => CanUseCamera;
     public bool HasNoRecipe => SelectedTask is null;
     public string CameraStatusText => SelectedCamera is null ? "未选择相机" : IsCameraConnected ? $"{SelectedCamera.Name} · 已连接" : $"{SelectedCamera.Name} · 未连接";
     public string CameraStatusColor => IsCameraConnected ? "#10B981" : "#EF4444";
@@ -163,7 +164,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         }
         SelectedCamera = Cameras.FirstOrDefault(item => item.Camera.CameraId == selectedCameraId) ?? Cameras.FirstOrDefault();
         if (selectedTaskId is not null) SelectedTask = Tasks.FirstOrDefault(item => item.Task.TaskId == selectedTaskId) ?? SelectedTask;
-        if (Cameras.Count == 0) DetailText = "尚未配置相机，请新增视觉任务并完成相机配置";
+        if (Cameras.Count == 0) DetailText = "尚未配置相机，请先点击“相机配置”新增并连接相机";
     }
 
     private void FilterTasksForCamera()
@@ -206,16 +207,18 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     private async Task StartAsync()
     {
-        if (!CanRunDetection) { DetailText = "需要已连接相机和检测配方才能开始检测"; return; }
+        if (!CanRunDetection) { DetailText = "请先选择并连接相机"; return; }
         _engine.Resume(); IsPaused = false; DetailText = "正在启动视觉检测...";
         await _engine.ReloadAsync();
         IsCameraConnected = SelectedCamera is not null && _engine.IsCameraConnected(SelectedCamera.Camera.CameraId);
-        DetailText = IsCameraConnected ? "视觉检测已启动" : "相机连接失败，请检查相机配置";
+        DetailText = IsCameraConnected
+            ? SelectedTask is null ? "实时预览已启动；创建任务配方后将自动执行检测" : "视觉检测已启动"
+            : "相机连接失败，请检查相机配置";
     }
 
     private void TogglePause()
     {
-        if (!CanRunDetection) { DetailText = "需要已连接相机和检测配方才能暂停检测"; return; }
+        if (!CanRunDetection) { DetailText = "请先选择并连接相机"; return; }
         if (IsPaused) _engine.Resume(); else _engine.Pause();
         IsPaused = !IsPaused; DetailText = IsPaused ? "检测算法已暂停，实时预览继续" : "视觉检测已继续";
     }

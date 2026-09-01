@@ -18,8 +18,19 @@ public partial class VisionTaskDialog : UserControl
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
-        Loaded += (_, _) => UpdateRegionOverlays();
+        Loaded += OnLoaded;
         Unloaded += (_, _) => { if (_viewModel is not null) _viewModel.PropertyChanged -= OnViewModelPropertyChanged; };
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs args)
+    {
+        // Prism Dialog 会复用视图实例，重新显示时必须恢复订阅，否则框选状态与覆盖框不会刷新。
+        if (_viewModel is not null)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
+        UpdateRegionOverlays();
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs args)
@@ -34,8 +45,6 @@ public partial class VisionTaskDialog : UserControl
     {
         if (args.PropertyName is nameof(VisionTaskDialogViewModel.SelectedOperator) or nameof(VisionTaskDialogViewModel.PreviewImage))
             Dispatcher.BeginInvoke(UpdateRegionOverlays);
-        if (args.PropertyName == nameof(VisionTaskDialogViewModel.IsRegionDrawing))
-            Dispatcher.BeginInvoke(UpdateSelectionCursor);
     }
 
     private void OnImageMouseDown(object sender, MouseButtonEventArgs args)
@@ -61,7 +70,6 @@ public partial class VisionTaskDialog : UserControl
         _dragStart = null;
         SelectionInputLayer.ReleaseMouseCapture();
         _viewModel?.CompleteRegionSelection();
-        UpdateSelectionCursor();
         args.Handled = true;
     }
 
@@ -100,13 +108,6 @@ public partial class VisionTaskDialog : UserControl
     }
 
     private void OnImageHostSizeChanged(object sender, SizeChangedEventArgs args) => UpdateRegionOverlays();
-
-    private void UpdateSelectionCursor()
-    {
-        var enabled = _viewModel?.IsRegionDrawing == true;
-        SelectionInputLayer.IsHitTestVisible = enabled;
-        SelectionInputLayer.Cursor = enabled ? Cursors.Cross : Cursors.Arrow;
-    }
 
     private void UpdateRegionOverlays()
     {

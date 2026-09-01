@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using IndustrialDAQ.UI.Services;
 using IndustrialDAQ.Vision.Abstractions;
 using IndustrialDAQ.Vision.Models;
@@ -37,7 +38,15 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
     public VisionCameraSourceOption SelectedSource
     {
         get => _selectedSource;
-        set { if (SetProperty(ref _selectedSource, value)) { RaisePropertyChanged(nameof(UsesDirectory)); RaisePropertyChanged(nameof(UsesMvs)); } }
+        set
+        {
+            if (!SetProperty(ref _selectedSource, value)) return;
+            RaisePropertyChanged(nameof(UsesDirectory));
+            RaisePropertyChanged(nameof(UsesMvs));
+            StatusText = value.DriverType == VisionCameraDriverTypes.HikvisionMvs
+                ? "点击“自动扫描”选择真实或 MVS 虚拟海康相机"
+                : "选择含 jpg、png 或 bmp 图片的目录作为连续模拟图像源";
+        }
     }
     public HikvisionCameraCandidate? SelectedDiscoveredCamera
     {
@@ -83,7 +92,9 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
     private void Browse()
     {
         var dialog = new OpenFolderDialog { Title = "选择模拟相机图片目录", Multiselect = false };
-        if (dialog.ShowDialog() == true) ImageDirectory = dialog.FolderName;
+        if (dialog.ShowDialog() != true) return;
+        ImageDirectory = dialog.FolderName;
+        StatusText = "已选择模拟图片目录，保存后将立即重新连接";
     }
 
     private async Task ScanAsync()
@@ -103,6 +114,19 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(CameraName)) throw new InvalidOperationException("请输入相机名称。");
+            if (IntervalMilliseconds < 50) throw new InvalidOperationException("帧间隔不能小于 50 毫秒。");
+            if (UsesDirectory)
+            {
+                if (!Directory.Exists(ImageDirectory)) throw new InvalidOperationException("请选择有效的模拟图片目录。");
+                var hasImage = Directory.EnumerateFiles(ImageDirectory).Any(path =>
+                    new[] { ".jpg", ".jpeg", ".png", ".bmp" }.Contains(Path.GetExtension(path).ToLowerInvariant()));
+                if (!hasImage) throw new InvalidOperationException("模拟图片目录中没有 jpg、png 或 bmp 图片。");
+            }
+            if (UsesMvs && string.IsNullOrWhiteSpace(_serialNumber))
+                throw new InvalidOperationException("请先自动扫描并选择一台海康相机。");
+
+            StatusText = "正在保存配置并连接相机...";
             await _repository.UpsertCameraAsync(new VisionCameraConfig
             {
                 CameraId = _cameraId, Name = CameraName.Trim(), DriverType = SelectedSource.DriverType,
