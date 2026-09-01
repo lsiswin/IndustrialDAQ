@@ -66,7 +66,12 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
         entity.ProductCode = task.ProductCode;
         entity.AlgorithmType = task.AlgorithmType;
         entity.RoiJson = JsonSerializer.Serialize(task.Roi);
-        entity.ParametersJson = JsonSerializer.Serialize(new TaskParameters(task.MatchThreshold, task.SaveNgImage));
+        entity.ParametersJson = JsonSerializer.Serialize(new TaskParameters
+        {
+            MatchThreshold = task.MatchThreshold,
+            SaveNgImage = task.SaveNgImage,
+            Operators = task.Operators
+        });
         entity.TemplateImagePath = task.TemplateImagePath;
         entity.IsEnabled = task.IsEnabled;
         entity.Version = task.Version;
@@ -127,11 +132,12 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
     private static VisionInspectionTask ToDomain(VisionInspectionTaskEntity entity)
     {
         var roi = JsonSerializer.Deserialize<VisionRoi>(entity.RoiJson) ?? VisionRoi.FullFrame;
-        var parameters = JsonSerializer.Deserialize<TaskParameters>(entity.ParametersJson) ?? new(0.8, true);
+        var parameters = JsonSerializer.Deserialize<TaskParameters>(entity.ParametersJson) ?? new TaskParameters();
         return new VisionInspectionTask
         {
             TaskId = entity.TaskId, CameraId = entity.CameraId, Name = entity.Name,
             ProductCode = entity.ProductCode, AlgorithmType = entity.AlgorithmType,
+            Operators = parameters.Operators ?? [],
             Roi = roi, MatchThreshold = parameters.MatchThreshold, SaveNgImage = parameters.SaveNgImage,
             TemplateImagePath = entity.TemplateImagePath, IsEnabled = entity.IsEnabled, Version = entity.Version
         };
@@ -150,6 +156,9 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
             throw new InvalidOperationException("视觉任务必须包含任务标识、相机标识和名称。");
         if (!task.Roi.IsValid) throw new InvalidOperationException("瓶盖检测 ROI 必须位于图像范围内。");
         if (task.MatchThreshold is < 0 or > 1) throw new InvalidOperationException("匹配阈值必须位于 0 到 1 之间。");
+        if (string.Equals(task.AlgorithmType, Algorithms.VisionOperatorPipelineAlgorithm.TypeName, StringComparison.OrdinalIgnoreCase)
+            && !task.Operators.Any(item => item.IsEnabled))
+            throw new InvalidOperationException("视觉任务至少需要一个已启用算子。");
     }
 
     private sealed class CameraConnection
@@ -160,7 +169,12 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
         public string DeviceSerialNumber { get; init; } = string.Empty;
         public string DeviceIpAddress { get; init; } = string.Empty;
     }
-    private sealed record TaskParameters(double MatchThreshold, bool SaveNgImage);
+    private sealed class TaskParameters
+    {
+        public double MatchThreshold { get; init; } = 0.8;
+        public bool SaveNgImage { get; init; } = true;
+        public IReadOnlyList<VisionOperatorDefinition>? Operators { get; init; } = [];
+    }
 
     private const string SqliteSchema = """
         CREATE TABLE IF NOT EXISTS vision_cameras (CameraId TEXT PRIMARY KEY, Name TEXT NOT NULL, DriverType TEXT NOT NULL, ConnectionConfigJson TEXT NOT NULL, TriggerMode TEXT NOT NULL, IsEnabled INTEGER NOT NULL, UpdatedAtUtc TEXT NOT NULL);
