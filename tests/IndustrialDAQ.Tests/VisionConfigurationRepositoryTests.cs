@@ -1,0 +1,48 @@
+using IndustrialDAQ.Infrastructure;
+using IndustrialDAQ.Vision.Models;
+using IndustrialDAQ.Vision.Storage;
+using Microsoft.EntityFrameworkCore;
+
+namespace IndustrialDAQ.Tests;
+
+public sealed class VisionConfigurationRepositoryTests
+{
+    [Fact]
+    public async Task Repository_RoundTripsCameraTaskAndResult()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), "industrialdaq-vision-" + Guid.NewGuid().ToString("N") + ".db");
+        var options = new DbContextOptionsBuilder<DaqDbContext>().UseSqlite("Data Source=" + databasePath).Options;
+        var factory = new TestFactory(options);
+        var repository = new VisionConfigurationRepository(factory);
+
+        await repository.UpsertCameraAsync(new VisionCameraConfig
+        {
+            CameraId = "cap-camera", Name = "瓶盖相机", ImageDirectory = "samples", IntervalMilliseconds = 500
+        });
+        await repository.UpsertTaskAsync(new VisionInspectionTask
+        {
+            TaskId = "cap-task", CameraId = "cap-camera", Name = "瓶盖有无",
+            Roi = new VisionRoi(0.2, 0.2, 0.5, 0.5), MatchThreshold = 0.86,
+            TemplateImagePath = "templates/cap.png"
+        });
+        await repository.SaveResultAsync(new VisionInspectionResult
+        {
+            RecordId = "record-1", TaskId = "cap-task", CameraId = "cap-camera",
+            FrameId = "frame-1", IsPass = true, CapPresent = true, MatchScore = 0.92
+        });
+
+        var camera = Assert.Single(await repository.LoadCamerasAsync());
+        var task = Assert.Single(await repository.LoadTasksAsync());
+        Assert.Equal("samples", camera.ImageDirectory);
+        Assert.Equal(0.86, task.MatchThreshold);
+        Assert.Equal(0.2, task.Roi.X);
+
+        await repository.DeleteTaskAsync(task.TaskId);
+        Assert.Empty(await repository.LoadTasksAsync());
+    }
+
+    private sealed class TestFactory(DbContextOptions<DaqDbContext> options) : IDbContextFactory<DaqDbContext>
+    {
+        public DaqDbContext CreateDbContext() => new(options);
+    }
+}

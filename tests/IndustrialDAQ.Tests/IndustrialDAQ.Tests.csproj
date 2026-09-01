@@ -11,5 +11,6 @@
     <ProjectReference Include="..\..\src\IndustrialDAQ.Infrastructure\IndustrialDAQ.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\IndustrialDAQ.Processing\IndustrialDAQ.Processing.csproj" />
     <ProjectReference Include="..\..\src\IndustrialDAQ.Storage\IndustrialDAQ.Storage.csproj" />
+    <ProjectReference Include="..\..\src\IndustrialDAQ.Vision\IndustrialDAQ.Vision.csproj" />
   </ItemGroup>
 </Project>

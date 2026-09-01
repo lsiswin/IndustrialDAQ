@@ -43,6 +43,9 @@ public sealed class DaqDbContext : DbContext
     public DbSet<UserRoleEntity> UserRoles => Set<UserRoleEntity>();
     public DbSet<SecurityAuditEntity> SecurityAudits => Set<SecurityAuditEntity>();
     public DbSet<CalculationRuleEntity> CalculationRules => Set<CalculationRuleEntity>();
+    public DbSet<VisionCameraEntity> VisionCameras => Set<VisionCameraEntity>();
+    public DbSet<VisionInspectionTaskEntity> VisionInspectionTasks => Set<VisionInspectionTaskEntity>();
+    public DbSet<VisionInspectionRecordEntity> VisionInspectionRecords => Set<VisionInspectionRecordEntity>();
 
     /// <summary>
     /// 使用选项配置（由 DI 注入连接字符串）。
@@ -169,6 +172,25 @@ public sealed class DaqDbContext : DbContext
             entity.HasKey(item => item.RuleId);
             entity.HasIndex(item => item.Enabled);
             entity.HasIndex(item => item.TargetTagId);
+        });
+        modelBuilder.Entity<VisionCameraEntity>(entity =>
+        {
+            entity.HasKey(item => item.CameraId);
+            entity.HasIndex(item => item.IsEnabled);
+        });
+        modelBuilder.Entity<VisionInspectionTaskEntity>(entity =>
+        {
+            entity.HasKey(item => item.TaskId);
+            entity.HasIndex(item => item.CameraId);
+            entity.HasIndex(item => item.IsEnabled);
+        });
+        modelBuilder.Entity<VisionInspectionRecordEntity>(entity =>
+        {
+            entity.HasKey(item => item.RecordId);
+            entity.HasIndex(item => item.TaskId);
+            entity.HasIndex(item => item.CameraId);
+            entity.HasIndex(item => item.TimestampUtc);
+            entity.HasIndex(item => new { item.TaskId, item.TimestampUtc });
         });
     }
 }
