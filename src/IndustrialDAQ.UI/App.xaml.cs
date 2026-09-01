@@ -127,6 +127,7 @@ public partial class App : PrismApplication
         containerRegistry.Register<AlarmRecordViewModel>();
         containerRegistry.Register<TrendViewModel>();
         containerRegistry.Register<VisionInspectionViewModel>();
+        containerRegistry.Register<VisionTaskDialogViewModel>();
 
         containerRegistry.RegisterForNavigation<DashboardView>();
         containerRegistry.RegisterForNavigation<ProductionMonitorView>();
@@ -144,7 +145,6 @@ public partial class App : PrismApplication
         containerRegistry.RegisterDialog<AddDeviceTemplateDialog, AddDeviceTemplateDialogViewModel>();
         containerRegistry.RegisterDialog<LoginDialog, LoginDialogViewModel>();
         containerRegistry.RegisterDialog<RegisterDialog, RegisterDialogViewModel>();
-        containerRegistry.RegisterDialog<VisionTaskDialog, VisionTaskDialogViewModel>();
         containerRegistry.RegisterDialog<VisionCameraDialog, VisionCameraDialogViewModel>();
     }
 
@@ -274,6 +274,62 @@ public partial class App : PrismApplication
         // ── 导航到仪表板 ──
         var regionManager = Container.Resolve<IRegionManager>();
         regionManager.RequestNavigate("MainRegion", nameof(DashboardView));
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        // WPF 退出不会自动调用手工启动的 IHostedService，必须显式停止以释放相机、PLC 和数据库资源。
+        try
+        {
+            using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            StopRuntimeServicesAsync(shutdown.Token).WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "客户端退出时释放运行时资源失败");
+        }
+        finally
+        {
+            _debounceCts?.Cancel();
+            _debounceCts?.Dispose();
+            _configWatcher?.Dispose();
+            Log.CloseAndFlush();
+            base.OnExit(e);
+        }
+    }
+
+    private async Task StopRuntimeServicesAsync(CancellationToken cancellationToken)
+    {
+        // 先停止上层消费与规则服务，再停止数据写入和底层采集，防止退出阶段继续产生新事件。
+        await StopSafelyAsync("视觉引擎", () => Container.Resolve<VisionInspectionEngine>().StopAsync(cancellationToken));
+        await StopSafelyAsync("趋势引擎", () => Container.Resolve<TrendEngine>().StopAsync(cancellationToken));
+        await StopSafelyAsync("报警通知", () => Container.Resolve<AlarmNotificationDispatcher>().StopAsync(cancellationToken));
+        await StopSafelyAsync("报警中心", () => Container.Resolve<IAlarmCenter>().StopAsync(cancellationToken));
+        await StopSafelyAsync("报警状态机", () => Container.Resolve<IAlarmStateMachineService>().StopAsync(cancellationToken));
+        await StopSafelyAsync("报警规则引擎", () => Container.Resolve<IRuleEngineService>().StopAsync(cancellationToken));
+        await StopSafelyAsync("报警管理器", () => Container.Resolve<AlarmManager>().StopAsync(cancellationToken));
+        await StopSafelyAsync("历史清理服务", () => Container.Resolve<HistoricalDataRetentionService>().StopAsync(cancellationToken));
+        await StopSafelyAsync("数据加工引擎", () => Container.Resolve<DataProcessor>().StopAsync(cancellationToken));
+        await StopSafelyAsync("历史写入器", () => Container.Resolve<HistoryWriter>().StopAsync(cancellationToken));
+        await StopSafelyAsync("采集宿主", () => Container.Resolve<AcquisitionHost>().StopAsync(cancellationToken));
+    }
+
+    private static async Task StopSafelyAsync(string serviceName, Func<Task> stop)
+    {
+        try
+        {
+            // 个别协议库可能忽略取消令牌；限制单服务退出时间，避免窗口关闭后进程永久挂起。
+            await stop().WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        catch (TimeoutException ex)
+        {
+            Log.Warning(ex, "停止服务 {ServiceName} 超时，继续释放其余资源", serviceName);
+        }
+        catch (Exception ex)
+        {
+            // 一个模块停止失败时继续释放其余工业资源，并保留完整退出日志。
+            Log.Warning(ex, "停止服务 {ServiceName} 失败", serviceName);
+        }
     }
 
     private void ConfigureDatabase(DbContextOptionsBuilder options)

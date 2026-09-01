@@ -19,6 +19,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     private readonly VisionResultPublisher _publisher;
     private readonly IDialogService _dialogService;
     private readonly IAuthManager _authManager;
+    private bool _isTaskEditorOpen;
     private readonly List<VisionTaskListItem> _allTasks = [];
     private VisionCameraListItem? _selectedCamera;
     private VisionTaskListItem? _selectedTask;
@@ -39,6 +40,17 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public ObservableCollection<VisionRecipeDisplayItem> CurrentRecipe { get; } = [];
     public bool CanModify => _authManager.CanModify;
     public bool CannotModify => !CanModify;
+    public VisionTaskDialogViewModel TaskEditor { get; }
+    public bool IsTaskEditorOpen
+    {
+        get => _isTaskEditorOpen;
+        private set
+        {
+            if (!SetProperty(ref _isTaskEditorOpen, value)) return;
+            RaisePropertyChanged(nameof(IsWorkbenchVisible));
+        }
+    }
+    public bool IsWorkbenchVisible => !IsTaskEditorOpen;
     public BitmapImage? PreviewImage { get => _previewImage; private set => SetProperty(ref _previewImage, value); }
     public string ResultText { get => _resultText; private set => SetProperty(ref _resultText, value); }
     public string ResultColor { get => _resultColor; private set => SetProperty(ref _resultColor, value); }
@@ -132,13 +144,16 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public DelegateCommand LoginToConfigureCommand { get; }
 
     public VisionInspectionViewModel(IVisionConfigurationRepository repository, VisionInspectionEngine engine,
-        VisionResultPublisher publisher, IDialogService dialogService, IAuthManager authManager)
+        VisionResultPublisher publisher, IDialogService dialogService, IAuthManager authManager,
+        VisionTaskDialogViewModel taskEditor)
     {
         _repository = repository; _engine = engine; _publisher = publisher;
         _dialogService = dialogService; _authManager = authManager;
-        AddTaskCommand = new DelegateCommand(() => OpenTaskDialog(null), () => CanModify);
+        TaskEditor = taskEditor;
+        TaskEditor.EditorClosed += OnTaskEditorClosed;
+        AddTaskCommand = new DelegateCommand(() => _ = OpenTaskEditorAsync(null), () => CanModify);
         ConfigureCameraCommand = new DelegateCommand(OpenCameraDialog, () => CanModify);
-        ConfigureCommand = new DelegateCommand(() => OpenTaskDialog(SelectedTask), () => CanModify && SelectedTask is not null);
+        ConfigureCommand = new DelegateCommand(() => _ = OpenTaskEditorAsync(SelectedTask), () => CanModify && SelectedTask is not null);
         RefreshCommand = new DelegateCommand(async () => await ReloadRuntimeAsync());
         TriggerCommand = new DelegateCommand(async () => await TriggerAsync(), () => CanUseCamera);
         StartCommand = new DelegateCommand(async () => await StartAsync(), () => CanRunDetection);
@@ -159,6 +174,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         _engine.FrameReceived -= OnFrameReceived;
         _engine.CameraStatusChanged -= OnCameraStatusChanged;
         _authManager.CurrentUserChanged -= OnCurrentUserChanged;
+        TaskEditor.EditorClosed -= OnTaskEditorClosed;
     }
 
     private async Task LoadAsync()
@@ -200,11 +216,16 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         await LoadAsync();
     }
 
-    private void OpenTaskDialog(VisionTaskListItem? item)
+    private async Task OpenTaskEditorAsync(VisionTaskListItem? item)
     {
-        var parameters = new DialogParameters();
-        if (item is not null) parameters.Add("TaskId", item.Task.TaskId);
-        _dialogService.ShowDialog("VisionTaskDialog", parameters, result => { if (result.Result == ButtonResult.OK) _ = ReloadRuntimeAsync(); });
+        IsTaskEditorOpen = true;
+        await TaskEditor.OpenAsync(item?.Task.TaskId);
+    }
+
+    private async void OnTaskEditorClosed(object? sender, VisionTaskEditorClosedEventArgs args)
+    {
+        IsTaskEditorOpen = false;
+        if (args.Saved) await ReloadRuntimeAsync();
     }
 
     private void OpenCameraDialog()

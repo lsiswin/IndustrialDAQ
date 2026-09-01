@@ -16,7 +16,7 @@ using Prism.Mvvm;
 namespace IndustrialDAQ.UI.ViewModels;
 
 /// <summary>通用视觉任务向导：选择相机后按顺序添加 OpenCV 算子并发布配方。</summary>
-public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
+public sealed class VisionTaskDialogViewModel : BindableBase
 {
     private readonly IVisionConfigurationRepository _repository;
     private readonly VisionTemplateTeachingService _teachingService;
@@ -133,7 +133,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     public DelegateCommand TeachCommand { get; }
     public DelegateCommand SaveCommand { get; }
     public DelegateCommand CancelCommand { get; }
-    public DialogCloseListener RequestClose { get; }
+    public event EventHandler<VisionTaskEditorClosedEventArgs>? EditorClosed;
 
     public VisionTaskDialogViewModel(IVisionConfigurationRepository repository,
         VisionTemplateTeachingService teachingService,
@@ -158,24 +158,32 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         RefreshTeachingFrameCommand = new DelegateCommand(async () => await LoadPreviewAsync(true), () => SelectedCamera is not null);
         TeachCommand = new DelegateCommand(async () => await TeachAndTestAsync());
         SaveCommand = new DelegateCommand(async () => await SaveAsync());
-        CancelCommand = new DelegateCommand(() => RequestClose.Invoke(ButtonResult.Cancel));
+        CancelCommand = new DelegateCommand(() => EditorClosed?.Invoke(this, new VisionTaskEditorClosedEventArgs(false, null)));
         LoadRecommendedRecipe();
     }
 
-    public bool CanCloseDialog() => true;
-    public void OnDialogClosed() { }
-
-    public async void OnDialogOpened(IDialogParameters parameters)
+    public async Task OpenAsync(string? taskId)
     {
-        // 视觉任务只引用相机配置，避免向导内重复维护连接参数。
+        // 页面内编辑器每次打开都恢复独立状态，避免上一次配方和框选手势残留。
+        IsRegionDrawing = false;
+        _teachingFrame = null;
+        PreviewImage = null;
+        _taskId = "vision-task-" + Guid.NewGuid().ToString("N")[..8];
+        TaskName = "瓶盖有无检测";
+        ProductCode = "VISION-001";
+        SaveNgImage = true;
+        LoadRecommendedRecipe();
+
+        // 视觉任务只引用已保存的相机配置，避免在配方页面重复维护连接参数。
         var cameras = await _repository.LoadCamerasAsync();
+        SelectedCamera = null;
         ExistingCameras.Clear();
         foreach (var camera in cameras.Where(item => item.IsEnabled)) ExistingCameras.Add(camera);
 
-        if (!parameters.TryGetValue("TaskId", out string? taskId) || string.IsNullOrWhiteSpace(taskId))
+        if (string.IsNullOrWhiteSpace(taskId))
         {
             SelectedCamera = ExistingCameras.FirstOrDefault();
-            if (SelectedCamera is null) StatusText = "尚未配置相机，请先关闭窗口并点击“相机配置”";
+            if (SelectedCamera is null) StatusText = "尚未配置相机，请返回视觉工作台并点击“相机配置”";
             return;
         }
 
@@ -321,7 +329,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             await ProvisionAlarmAsync(camera, task);
             await _audit.RecordAsync(_authManager.CurrentUser.Id, _authManager.CurrentUser.Username,
                 "VisionTaskSaved", ResultPath(camera, task), $"Operators={task.Operators.Count};Product={task.ProductCode}", true);
-            RequestClose.Invoke(new DialogParameters { { "TaskId", task.TaskId } }, ButtonResult.OK);
+            EditorClosed?.Invoke(this, new VisionTaskEditorClosedEventArgs(true, task.TaskId));
         }
         catch (Exception ex) { StatusText = "发布失败：" + ex.Message; }
     }
@@ -475,6 +483,13 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
         image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
     }
+}
+
+/// <summary>页面内视觉配方编辑器关闭通知，父工作台据此恢复显示并按需重载运行时。</summary>
+public sealed class VisionTaskEditorClosedEventArgs(bool saved, string? taskId) : EventArgs
+{
+    public bool Saved { get; } = saved;
+    public string? TaskId { get; } = taskId;
 }
 
 /// <summary>可编辑算子项，将动态参数映射到通用配方模型。</summary>

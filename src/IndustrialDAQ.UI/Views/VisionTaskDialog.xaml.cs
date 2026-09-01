@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -51,7 +50,7 @@ public partial class VisionTaskDialog : UserControl
             Dispatcher.BeginInvoke(ResetSelectionGesture);
     }
 
-    private void OnRegionDragStarted(object sender, DragStartedEventArgs args)
+    private void OnRegionMouseDown(object sender, MouseButtonEventArgs args)
     {
         if (_viewModel?.IsRegionDrawing != true) return;
         if (PreviewImageControl.Source is not BitmapSource)
@@ -66,31 +65,35 @@ public partial class VisionTaskDialog : UserControl
             return;
         }
 
-        // 若已经保留了第一次单击，则本次按下直接确定终点。
+        // 已保留第一次单击时，第二次单击直接确定终点。
         if (_selectionStart is not null)
         {
             ApplyRegion(_selectionStart.Value, point.Value);
             ResetSelectionGesture();
             _viewModel.CompleteRegionSelection();
+            args.Handled = true;
             return;
         }
 
         _selectionStart = point;
         _hasDragDelta = false;
+        SelectionSurface.CaptureMouse();
         _viewModel.ReportSelectionIssue("已确定框选起点：可按住拖动，或松开后再次单击终点");
         ShowDragStart(point.Value);
+        args.Handled = true;
     }
 
-    private void OnRegionDragDelta(object sender, DragDeltaEventArgs args)
+    private void OnRegionMouseMove(object sender, MouseEventArgs args)
     {
-        if (_selectionStart is null) return;
+        if (_selectionStart is null || args.LeftButton != MouseButtonState.Pressed) return;
         var end = ToNormalizedPoint(Mouse.GetPosition(ImageSelectionHost), clampToImage: true);
         if (end is null) return;
         _hasDragDelta |= Math.Abs(_selectionStart.Value.X - end.Value.X) >= 0.005 || Math.Abs(_selectionStart.Value.Y - end.Value.Y) >= 0.005;
         if (_hasDragDelta) ApplyRegion(_selectionStart.Value, end.Value);
+        args.Handled = true;
     }
 
-    private void OnRegionDragCompleted(object sender, DragCompletedEventArgs args)
+    private void OnRegionMouseUp(object sender, MouseButtonEventArgs args)
     {
         if (_selectionStart is null) return;
         var end = ToNormalizedPoint(Mouse.GetPosition(ImageSelectionHost), clampToImage: true);
@@ -102,8 +105,10 @@ public partial class VisionTaskDialog : UserControl
         }
         else
         {
+            if (SelectionSurface.IsMouseCaptured) SelectionSurface.ReleaseMouseCapture();
             _viewModel?.ReportSelectionIssue("起点已保留，请在图像中再次单击区域终点");
         }
+        args.Handled = true;
     }
 
     private void ApplyRegion(Point start, Point end)
@@ -154,7 +159,7 @@ public partial class VisionTaskDialog : UserControl
     {
         _selectionStart = null;
         _hasDragDelta = false;
-        if (SelectionThumb.IsMouseCaptured) SelectionThumb.ReleaseMouseCapture();
+        if (SelectionSurface.IsMouseCaptured) SelectionSurface.ReleaseMouseCapture();
         DragStartMarker.Visibility = Visibility.Collapsed;
     }
 

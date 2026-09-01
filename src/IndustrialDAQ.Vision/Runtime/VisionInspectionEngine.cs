@@ -70,13 +70,20 @@ public sealed class VisionInspectionEngine : IHostedService
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _cts?.Cancel();
-        try { await Task.WhenAll(_cameraLoops).WaitAsync(cancellationToken); }
+        try
+        {
+            await Task.WhenAll(_cameraLoops).WaitAsync(cancellationToken);
+        }
         catch (OperationCanceledException) { }
-        foreach (var driver in _drivers.Values) await driver.DisposeAsync();
-        _drivers.Clear();
-        _cameraLoops.Clear();
-        _cts?.Dispose();
-        _cts = null;
+        catch (Exception ex)
+        {
+            // 相机循环故障不能阻断资源释放，否则海康相机会在客户端重启后仍被旧句柄占用。
+            _logger.LogWarning(ex, "停止视觉相机循环时发生异常，将继续释放全部相机资源");
+        }
+        finally
+        {
+            await ReleaseRuntimeResourcesAsync();
+        }
     }
 
     public async Task ReloadAsync(CancellationToken cancellationToken = default)
@@ -87,11 +94,14 @@ public sealed class VisionInspectionEngine : IHostedService
             if (_cameraLoops.Count > 0 || _drivers.Count > 0)
             {
                 _cts?.Cancel();
-                try { await Task.WhenAll(_cameraLoops); } catch (OperationCanceledException) { }
-                foreach (var driver in _drivers.Values) await driver.DisposeAsync();
-                _drivers.Clear();
-                _cameraLoops.Clear();
-                _cts?.Dispose();
+                try { await Task.WhenAll(_cameraLoops); }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    // 热重载同样必须容忍旧相机循环失败，确保旧驱动先释放再创建新驱动。
+                    _logger.LogWarning(ex, "重载视觉配置时旧相机循环退出异常");
+                }
+                await ReleaseRuntimeResourcesAsync();
                 _cts = new CancellationTokenSource();
             }
 
@@ -118,6 +128,30 @@ public sealed class VisionInspectionEngine : IHostedService
             _logger.LogInformation("视觉引擎已加载 {CameraCount} 台相机、{TaskCount} 个任务", cameras.Count, tasks.Count);
         }
         finally { _reloadLock.Release(); }
+    }
+
+    private async Task ReleaseRuntimeResourcesAsync()
+    {
+        var drivers = _drivers.Values.ToArray();
+        _drivers.Clear();
+        _cameraLoops.Clear();
+        _latestFrames.Clear();
+
+        foreach (var driver in drivers)
+        {
+            try
+            {
+                await driver.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                // 单台相机释放失败不能影响其他相机，避免一次故障造成整批设备句柄泄漏。
+                _logger.LogWarning(ex, "释放视觉相机 {CameraId} 失败", driver.CameraId);
+            }
+        }
+
+        _cts?.Dispose();
+        _cts = null;
     }
 
     public async Task<VisionInspectionResult?> TriggerAsync(string cameraId, CancellationToken cancellationToken = default)

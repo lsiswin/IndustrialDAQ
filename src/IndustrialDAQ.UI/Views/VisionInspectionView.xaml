@@ -1,13 +1,15 @@
 <UserControl x:Class="IndustrialDAQ.UI.Views.VisionInspectionView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:IndustrialDAQ.UI.Views"
              Background="{DynamicResource MainBgBrush}">
     <UserControl.Resources><BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
         <Style x:Key="VisionButton" TargetType="Button"><Setter Property="Padding" Value="14,7"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Background" Value="{DynamicResource BrushBgSecondary}"/><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="Cursor" Value="Hand"/></Style>
         <Style x:Key="MetricCard" TargetType="Border"><Setter Property="Background" Value="{DynamicResource CardBgBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/><Setter Property="Padding" Value="16"/><Setter Property="Margin" Value="0,0,12,0"/></Style>
         <Style x:Key="SectionBorder" TargetType="Border"><Setter Property="Background" Value="{DynamicResource CardBgBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="7"/></Style>
     </UserControl.Resources>
-    <Grid Margin="18"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="3*"/><RowDefinition Height="2*"/></Grid.RowDefinitions>
+    <Grid>
+    <Grid Margin="18" Visibility="{Binding IsWorkbenchVisible, Converter={StaticResource BoolToVisibility}}"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="3*"/><RowDefinition Height="2*"/></Grid.RowDefinitions>
         <!-- 标题与运行状态 -->
         <Grid Grid.Row="0" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal"><TextBlock Text="机器视觉检测" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/><Border Width="1" Height="22" Background="{DynamicResource BorderBrush}" Margin="14,0"/><TextBlock Text="OpenCV 顺序配方" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"/></StackPanel>
@@ -52,5 +54,9 @@
         </Grid>
         <!-- 检测历史 -->
         <Border Grid.Row="4" Style="{StaticResource SectionBorder}"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock Text="┃ 检测历史（当前运行）" Foreground="{DynamicResource InfoBrush}" FontWeight="Bold" Margin="14,10"/><DataGrid Grid.Row="1" ItemsSource="{Binding History}" AutoGenerateColumns="False" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" HeadersVisibility="Column"><DataGrid.Columns><DataGridTextColumn Header="时间" Binding="{Binding Timestamp, StringFormat=HH:mm:ss.fff}" Width="120"/><DataGridTextColumn Header="图像编号" Binding="{Binding ImageName}" Width="2*"/><DataGridTextColumn Header="结果" Binding="{Binding ResultText}" Width="130"/><DataGridTextColumn Header="匹配度" Binding="{Binding Score, StringFormat=F3}" Width="100"/><DataGridTextColumn Header="耗时" Binding="{Binding Elapsed, StringFormat={}{0:F1} ms}" Width="100"/><DataGridTextColumn Header="报警" Binding="{Binding AlarmText}" Width="100"/><DataGridTextColumn Header="NG 图片" Binding="{Binding ImagePath}" Width="2*"/></DataGrid.Columns></DataGrid></Grid></Border>
+    </Grid>
+    <Border Margin="18" Visibility="{Binding IsTaskEditorOpen, Converter={StaticResource BoolToVisibility}}">
+        <views:VisionTaskDialog DataContext="{Binding TaskEditor}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+    </Border>
     </Grid>
 </UserControl>
