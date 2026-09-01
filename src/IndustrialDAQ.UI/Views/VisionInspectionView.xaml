@@ -25,7 +25,15 @@
         <!-- 实时图像与配置 -->
         <Grid Grid.Row="3" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="1.3*"/></Grid.ColumnDefinitions>
             <Border Grid.Column="0" Style="{StaticResource SectionBorder}" Margin="0,0,10,0"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                <Border Padding="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1"><DockPanel><TextBlock Text="┃ 实时图像 · " Foreground="{DynamicResource InfoBrush}" FontWeight="Bold"/><TextBlock Text="{Binding CameraName}" Foreground="{DynamicResource TextPrimaryBrush}"/><TextBlock DockPanel.Dock="Right" Text="{Binding ImageDirectory}" Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis"/></DockPanel></Border>
+                <Border Padding="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right" Content="{Binding PreviewPauseButtonText}" Command="{Binding PreviewPauseCommand}"
+                                Padding="10,4" Margin="10,0,0,0" Background="{DynamicResource BrushBgSecondary}"
+                                Foreground="{DynamicResource TextPrimaryBrush}" BorderBrush="{DynamicResource BorderBrush}"/>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding ImageDirectory}" Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="┃ 实时图像 · " Foreground="{DynamicResource InfoBrush}" FontWeight="Bold"/><TextBlock Text="{Binding CameraName}" Foreground="{DynamicResource TextPrimaryBrush}"/></StackPanel>
+                    </DockPanel>
+                </Border>
                 <TextBlock Grid.Row="1" Text="{Binding FrameInfo}" Foreground="{DynamicResource TextMutedBrush}" Margin="12,8"/>
                 <Grid Grid.Row="2" Background="#111827" Margin="12,0"><Image Source="{Binding PreviewImage}" Stretch="Uniform"/><Border Background="{Binding ResultColor}" CornerRadius="4" Padding="13,7" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12"><TextBlock Text="{Binding ResultText}" Foreground="White" FontWeight="Bold"/></Border></Grid>
                 <TextBlock Grid.Row="3" Text="{Binding DetailText}" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="12,9"/>

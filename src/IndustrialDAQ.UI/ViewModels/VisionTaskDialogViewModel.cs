@@ -228,6 +228,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
 
     public void CompleteRegionSelection() => IsRegionDrawing = false;
 
+    public void ReportSelectionIssue(string message) => StatusText = message;
+
     private void RemoveOperator()
     {
         if (SelectedOperator is null) return;

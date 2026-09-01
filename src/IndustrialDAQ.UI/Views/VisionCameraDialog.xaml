@@ -24,6 +24,37 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             <Setter Property="Background" Value="{DynamicResource BrushBgSecondary}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderSecondaryBrush}"/>
+            <!-- 使用主题资源重绘下拉框，避免 Windows 默认模板在深色主题下显示白色背景。 -->
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="4"/>
+                            <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                            <ToggleButton HorizontalAlignment="Right" Width="38" Background="Transparent" BorderThickness="0"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <TextBlock Text="▾" Foreground="{TemplateBinding Foreground}" FontSize="14"/>
+                            </ToggleButton>
+                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
+                                <Border MinWidth="{TemplateBinding ActualWidth}" MaxHeight="280" Background="{DynamicResource CardBgBrush}"
+                                        BorderBrush="{DynamicResource BorderSecondaryBrush}" BorderThickness="1" CornerRadius="4" Padding="2">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource CardBgBrush}"/>
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="{DynamicResource BrushBgTertiary}"/></Trigger>
+                <Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{DynamicResource BrushBgSecondary}"/></Trigger>
+            </Style.Triggers>
         </Style>
     </UserControl.Resources>
 
@@ -44,8 +75,18 @@
             <Border Grid.Row="1" Background="{DynamicResource BrushBgSecondary}" BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="18">
                 <Grid>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <StackPanel Margin="0,0,8,0">
+                            <TextBlock Text="已保存相机" Style="{StaticResource FieldLabel}"/>
+                            <ComboBox Style="{StaticResource CameraCombo}" ItemsSource="{Binding SavedCameras}"
+                                      SelectedItem="{Binding SelectedSavedCamera}" DisplayMemberPath="Name"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="＋ 新建相机" Command="{Binding NewCameraCommand}" Padding="16,9" VerticalAlignment="Bottom"/>
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="0,16,0,0">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="0.95*"/></Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,8,0">
                             <TextBlock Text="相机来源" Style="{StaticResource FieldLabel}"/>
@@ -58,7 +99,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <StackPanel Grid.Row="1" Margin="0,16,0,0" Visibility="{Binding UsesDirectory, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Grid.Row="2" Margin="0,16,0,0" Visibility="{Binding UsesDirectory, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="模拟图片目录" Style="{StaticResource FieldLabel}"/>
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBox Style="{StaticResource CameraInput}" Text="{Binding ImageDirectory}" IsReadOnly="True"/>
@@ -66,7 +107,7 @@
                         </Grid>
                     </StackPanel>
 
-                    <StackPanel Grid.Row="1" Margin="0,16,0,0" Visibility="{Binding UsesMvs, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel Grid.Row="2" Margin="0,16,0,0" Visibility="{Binding UsesMvs, Converter={StaticResource BoolToVisibility}}">
                         <TextBlock Text="海康 MVS 相机" Style="{StaticResource FieldLabel}"/>
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <ComboBox Style="{StaticResource CameraCombo}" ItemsSource="{Binding DiscoveredCameras}"
@@ -75,7 +116,7 @@
                         </Grid>
                     </StackPanel>
 
-                    <Grid Grid.Row="2" Margin="0,16,0,0">
+                    <Grid Grid.Row="3" Margin="0,16,0,0">
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
                         <StackPanel Margin="0,0,8,0">
                             <TextBlock Text="帧间隔（毫秒）" Style="{StaticResource FieldLabel}"/>
@@ -85,7 +126,7 @@
                                   Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Bottom" Margin="16,0,0,12"/>
                     </Grid>
 
-                    <Border Grid.Row="3" Background="{DynamicResource CardBgBrush}" CornerRadius="6" Padding="12" Margin="0,16,0,0">
+                    <Border Grid.Row="4" Background="{DynamicResource CardBgBrush}" CornerRadius="6" Padding="12" Margin="0,16,0,0">
                         <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
                     </Border>
                 </Grid>

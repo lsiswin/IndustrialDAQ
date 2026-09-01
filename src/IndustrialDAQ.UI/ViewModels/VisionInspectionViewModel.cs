@@ -30,6 +30,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     private long _totalCount;
     private long _ngCount;
     private bool _isPaused;
+    private bool _isPreviewPaused;
     private bool _isCameraConnected;
 
     public ObservableCollection<VisionCameraListItem> Cameras { get; } = [];
@@ -50,6 +51,16 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public string PassRateText => TotalCount == 0 ? "--" : $"{PassRate:F2}%";
     public bool IsPaused { get => _isPaused; private set { SetProperty(ref _isPaused, value); RaisePropertyChanged(nameof(PauseButtonText)); } }
     public string PauseButtonText => IsPaused ? "▶ 继续" : "Ⅱ 暂停";
+    public bool IsPreviewPaused
+    {
+        get => _isPreviewPaused;
+        private set
+        {
+            if (!SetProperty(ref _isPreviewPaused, value)) return;
+            RaisePropertyChanged(nameof(PreviewPauseButtonText));
+        }
+    }
+    public string PreviewPauseButtonText => IsPreviewPaused ? "▶ 恢复画面" : "Ⅱ 暂停画面";
 
     public VisionCameraListItem? SelectedCamera
     {
@@ -57,6 +68,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         set
         {
             if (!SetProperty(ref _selectedCamera, value)) return;
+            IsPreviewPaused = false;
             FilterTasksForCamera();
             IsCameraConnected = value is not null && _engine.IsCameraConnected(value.Camera.CameraId);
             RaiseCameraDetails();
@@ -115,6 +127,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public DelegateCommand TriggerCommand { get; }
     public DelegateCommand StartCommand { get; }
     public DelegateCommand PauseCommand { get; }
+    public DelegateCommand PreviewPauseCommand { get; }
     public DelegateCommand ResetCommand { get; }
     public DelegateCommand LoginToConfigureCommand { get; }
 
@@ -130,6 +143,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         TriggerCommand = new DelegateCommand(async () => await TriggerAsync(), () => CanUseCamera);
         StartCommand = new DelegateCommand(async () => await StartAsync(), () => CanRunDetection);
         PauseCommand = new DelegateCommand(TogglePause, () => CanRunDetection);
+        PreviewPauseCommand = new DelegateCommand(TogglePreviewPause, () => CanUseCamera);
         ResetCommand = new DelegateCommand(ResetStatistics, () => CanModify && SelectedTask is not null);
         LoginToConfigureCommand = new DelegateCommand(OpenLogin, () => CannotModify);
         _engine.InspectionCompleted += OnInspectionCompleted;
@@ -223,6 +237,14 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         IsPaused = !IsPaused; DetailText = IsPaused ? "检测算法已暂停，实时预览继续" : "视觉检测已继续";
     }
 
+    private void TogglePreviewPause()
+    {
+        if (!CanUseCamera) { DetailText = "请先选择并连接相机"; return; }
+        // 只冻结 UI 画面，后台取流、检测、报警和历史记录仍继续运行。
+        IsPreviewPaused = !IsPreviewPaused;
+        DetailText = IsPreviewPaused ? "实时预览画面已冻结，后台检测继续运行" : "实时预览画面已恢复";
+    }
+
     private void ResetStatistics()
     {
         if (SelectedTask is not null) _publisher.ResetStatistics(SelectedTask.Task.TaskId);
@@ -243,7 +265,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
 
     private void OnFrameReceived(object? sender, VisionFrameReceivedEventArgs args)
     {
-        if (SelectedCamera?.Camera.CameraId != args.Frame.CameraId) return;
+        if (SelectedCamera?.Camera.CameraId != args.Frame.CameraId || IsPreviewPaused) return;
         Application.Current?.Dispatcher.Invoke(() =>
         {
             PreviewImage = Decode(args.Frame.EncodedImage);
@@ -287,6 +309,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     {
         AddTaskCommand.RaiseCanExecuteChanged(); ConfigureCameraCommand.RaiseCanExecuteChanged(); ConfigureCommand.RaiseCanExecuteChanged();
         TriggerCommand.RaiseCanExecuteChanged(); StartCommand.RaiseCanExecuteChanged(); PauseCommand.RaiseCanExecuteChanged();
+        PreviewPauseCommand.RaiseCanExecuteChanged();
         ResetCommand.RaiseCanExecuteChanged();
     }
 

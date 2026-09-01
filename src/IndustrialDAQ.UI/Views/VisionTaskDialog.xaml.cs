@@ -49,11 +49,21 @@ public partial class VisionTaskDialog : UserControl
 
     private void OnImageMouseDown(object sender, MouseButtonEventArgs args)
     {
-        if (_viewModel?.IsRegionDrawing != true || PreviewImageControl.Source is not BitmapSource) return;
+        if (_viewModel?.IsRegionDrawing != true) return;
+        if (PreviewImageControl.Source is not BitmapSource)
+        {
+            _viewModel.ReportSelectionIssue("尚未取得相机图像，无法框选；请先确认相机已连接");
+            return;
+        }
         var point = ToNormalizedPoint(args.GetPosition(ImageSelectionHost));
-        if (point is null) return;
+        if (point is null)
+        {
+            _viewModel.ReportSelectionIssue("请在实际图像范围内按下鼠标左键并拖动");
+            return;
+        }
         _dragStart = point;
-        SelectionInputLayer.CaptureMouse();
+        _viewModel.ReportSelectionIssue("已确定框选起点，请按住左键拖动到区域终点");
+        ImageSelectionHost.CaptureMouse();
         args.Handled = true;
     }
 
@@ -68,7 +78,7 @@ public partial class VisionTaskDialog : UserControl
         if (_dragStart is null) return;
         UpdateDraggedRegion(args.GetPosition(ImageSelectionHost));
         _dragStart = null;
-        SelectionInputLayer.ReleaseMouseCapture();
+        ImageSelectionHost.ReleaseMouseCapture();
         _viewModel?.CompleteRegionSelection();
         args.Handled = true;
     }

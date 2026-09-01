@@ -25,16 +25,27 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
     private bool _loop = true;
     private VisionCameraSourceOption _selectedSource = CameraSourceOptions.All[1];
     private HikvisionCameraCandidate? _selectedDiscoveredCamera;
+    private VisionCameraConfig? _selectedSavedCamera;
     private string _statusText = "配置相机后即可在工作台实时预览，无需先创建配方";
 
     public string Title => "相机配置";
     public IReadOnlyList<VisionCameraSourceOption> CameraSources { get; } = CameraSourceOptions.All;
+    public ObservableCollection<VisionCameraConfig> SavedCameras { get; } = [];
     public ObservableCollection<HikvisionCameraCandidate> DiscoveredCameras { get; } = [];
     public string CameraName { get => _cameraName; set => SetProperty(ref _cameraName, value); }
     public string ImageDirectory { get => _imageDirectory; set => SetProperty(ref _imageDirectory, value); }
     public int IntervalMilliseconds { get => _intervalMilliseconds; set => SetProperty(ref _intervalMilliseconds, value); }
     public bool Loop { get => _loop; set => SetProperty(ref _loop, value); }
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
+    public VisionCameraConfig? SelectedSavedCamera
+    {
+        get => _selectedSavedCamera;
+        set
+        {
+            if (!SetProperty(ref _selectedSavedCamera, value) || value is null) return;
+            ApplyCamera(value);
+        }
+    }
     public VisionCameraSourceOption SelectedSource
     {
         get => _selectedSource;
@@ -61,6 +72,7 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
     public bool UsesMvs => SelectedSource.DriverType == VisionCameraDriverTypes.HikvisionMvs;
     public DelegateCommand BrowseCommand { get; }
     public DelegateCommand ScanCommand { get; }
+    public DelegateCommand NewCameraCommand { get; }
     public DelegateCommand SaveCommand { get; }
     public DelegateCommand CancelCommand { get; }
     public DialogCloseListener RequestClose { get; }
@@ -71,6 +83,7 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
         _repository = repository; _discovery = discovery; _engine = engine;
         BrowseCommand = new DelegateCommand(Browse);
         ScanCommand = new DelegateCommand(async () => await ScanAsync());
+        NewCameraCommand = new DelegateCommand(StartNewCamera);
         SaveCommand = new DelegateCommand(async () => await SaveAsync());
         CancelCommand = new DelegateCommand(() => RequestClose.Invoke(ButtonResult.Cancel));
     }
@@ -79,14 +92,39 @@ public sealed class VisionCameraDialogViewModel : BindableBase, IDialogAware
     public void OnDialogClosed() { }
     public async void OnDialogOpened(IDialogParameters parameters)
     {
-        if (!parameters.TryGetValue("CameraId", out string? cameraId) || string.IsNullOrWhiteSpace(cameraId)) return;
-        var camera = (await _repository.LoadCamerasAsync()).FirstOrDefault(item => item.CameraId == cameraId);
-        if (camera is null) return;
+        // 相机配置持久化在业务数据库中，打开弹窗时始终加载，后续无需重复添加。
+        var cameras = await _repository.LoadCamerasAsync();
+        SavedCameras.Clear();
+        foreach (var item in cameras) SavedCameras.Add(item);
+        parameters.TryGetValue("CameraId", out string? cameraId);
+        SelectedSavedCamera = SavedCameras.FirstOrDefault(item => item.CameraId == cameraId) ?? SavedCameras.FirstOrDefault();
+        if (SelectedSavedCamera is null) StartNewCamera();
+    }
+
+    private void ApplyCamera(VisionCameraConfig camera)
+    {
         _cameraId = camera.CameraId; CameraName = camera.Name; ImageDirectory = camera.ImageDirectory;
         _serialNumber = camera.DeviceSerialNumber; _ipAddress = camera.DeviceIpAddress;
         IntervalMilliseconds = camera.IntervalMilliseconds; Loop = camera.Loop;
         SelectedSource = CameraSources.FirstOrDefault(item => item.DriverType == camera.DriverType) ?? CameraSources[0];
-        StatusText = "已加载相机配置，保存后运行时会自动重新连接";
+        StatusText = $"已加载相机“{camera.Name}”，修改后保存即可重新连接";
+    }
+
+    private void StartNewCamera()
+    {
+        _cameraId = "vision-camera-" + Guid.NewGuid().ToString("N")[..8];
+        _selectedSavedCamera = null;
+        RaisePropertyChanged(nameof(SelectedSavedCamera));
+        CameraName = "视觉相机";
+        ImageDirectory = string.Empty;
+        _serialNumber = string.Empty;
+        _ipAddress = string.Empty;
+        IntervalMilliseconds = 1000;
+        Loop = true;
+        SelectedSource = CameraSourceOptions.All[1];
+        DiscoveredCameras.Clear();
+        SelectedDiscoveredCamera = null;
+        StatusText = "正在创建新相机配置；保存后会进入已保存相机列表";
     }
 
     private void Browse()
