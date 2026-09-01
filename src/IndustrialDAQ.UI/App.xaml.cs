@@ -23,6 +23,7 @@ using IndustrialDAQ.Storage;
 using IndustrialDAQ.Trend;
 using IndustrialDAQ.Vision.Abstractions;
 using IndustrialDAQ.Vision.Algorithms;
+using IndustrialDAQ.Vision.Cameras;
 using IndustrialDAQ.Vision.Runtime;
 using IndustrialDAQ.Vision.Storage;
 using IndustrialDAQ.UI.ViewModels;
@@ -67,6 +68,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<CalculationResourceSynchronizer>();
         containerRegistry.RegisterSingleton<IVisionConfigurationRepository, VisionConfigurationRepository>();
         containerRegistry.RegisterSingleton<IVisionInspectionAlgorithm, CapPresenceTemplateAlgorithm>();
+        containerRegistry.RegisterSingleton<IHikvisionCameraDiscoveryService, HikvisionCameraDiscoveryService>();
         containerRegistry.RegisterSingleton<VisionTemplateTeachingService>();
         containerRegistry.RegisterSingleton<VisionResultPublisher>();
         containerRegistry.RegisterSingleton<VisionResourceSynchronizer>();

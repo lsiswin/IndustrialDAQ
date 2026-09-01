@@ -157,9 +157,13 @@ public sealed class VisionInspectionEngine : IHostedService
     }
 
     private static IVisionCameraDriver CreateDriver(VisionCameraConfig camera) =>
-        camera.DriverType.Equals("Directory", StringComparison.OrdinalIgnoreCase)
-            ? new DirectoryCameraDriver(camera)
-            : throw new NotSupportedException($"暂不支持视觉相机驱动：{camera.DriverType}");
+        camera.DriverType switch
+        {
+            VisionCameraDriverTypes.Directory => new DirectoryCameraDriver(camera),
+            VisionCameraDriverTypes.HikvisionSimulator => new DirectoryCameraDriver(camera),
+            VisionCameraDriverTypes.HikvisionMvs => new HikvisionMvsCameraDriver(camera),
+            _ => throw new NotSupportedException($"暂不支持视觉相机驱动：{camera.DriverType}")
+        };
 
     private static VisionInspectionResult CopyWithImagePath(VisionInspectionResult source, string imagePath) => new()
     {

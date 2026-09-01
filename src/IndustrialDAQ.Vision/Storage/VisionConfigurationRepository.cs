@@ -42,7 +42,11 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
         if (db.Entry(entity).State == EntityState.Detached) db.VisionCameras.Add(entity);
         entity.Name = camera.Name;
         entity.DriverType = camera.DriverType;
-        entity.ConnectionConfigJson = JsonSerializer.Serialize(new CameraConnection(camera.ImageDirectory, camera.IntervalMilliseconds, camera.Loop));
+        entity.ConnectionConfigJson = JsonSerializer.Serialize(new CameraConnection
+        {
+            ImageDirectory = camera.ImageDirectory, IntervalMilliseconds = camera.IntervalMilliseconds, Loop = camera.Loop,
+            DeviceSerialNumber = camera.DeviceSerialNumber, DeviceIpAddress = camera.DeviceIpAddress
+        });
         entity.TriggerMode = camera.TriggerMode.ToString();
         entity.IsEnabled = camera.IsEnabled;
         entity.UpdatedAtUtc = DateTime.UtcNow;
@@ -109,11 +113,12 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
 
     private static VisionCameraConfig ToDomain(VisionCameraEntity entity)
     {
-        var connection = JsonSerializer.Deserialize<CameraConnection>(entity.ConnectionConfigJson) ?? new("", 1000, true);
+        var connection = JsonSerializer.Deserialize<CameraConnection>(entity.ConnectionConfigJson) ?? new CameraConnection();
         return new VisionCameraConfig
         {
             CameraId = entity.CameraId, Name = entity.Name, DriverType = entity.DriverType,
             ImageDirectory = connection.ImageDirectory, IntervalMilliseconds = connection.IntervalMilliseconds,
+            DeviceSerialNumber = connection.DeviceSerialNumber, DeviceIpAddress = connection.DeviceIpAddress,
             Loop = connection.Loop, TriggerMode = Enum.TryParse<VisionTriggerMode>(entity.TriggerMode, true, out var mode) ? mode : VisionTriggerMode.Continuous,
             IsEnabled = entity.IsEnabled
         };
@@ -147,7 +152,14 @@ public sealed class VisionConfigurationRepository : IVisionConfigurationReposito
         if (task.MatchThreshold is < 0 or > 1) throw new InvalidOperationException("匹配阈值必须位于 0 到 1 之间。");
     }
 
-    private sealed record CameraConnection(string ImageDirectory, int IntervalMilliseconds, bool Loop);
+    private sealed class CameraConnection
+    {
+        public string ImageDirectory { get; init; } = string.Empty;
+        public int IntervalMilliseconds { get; init; } = 1000;
+        public bool Loop { get; init; } = true;
+        public string DeviceSerialNumber { get; init; } = string.Empty;
+        public string DeviceIpAddress { get; init; } = string.Empty;
+    }
     private sealed record TaskParameters(double MatchThreshold, bool SaveNgImage);
 
     private const string SqliteSchema = """
