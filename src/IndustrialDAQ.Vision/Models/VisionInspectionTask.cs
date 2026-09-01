@@ -8,6 +8,7 @@ public sealed class VisionInspectionTask
     public string Name { get; init; } = string.Empty;
     public string ProductCode { get; init; } = string.Empty;
     public string AlgorithmType { get; init; } = "CapPresenceTemplate";
+    public IReadOnlyList<VisionOperatorDefinition> Operators { get; init; } = [];
     public VisionRoi Roi { get; init; } = VisionRoi.FullFrame;
     public double MatchThreshold { get; init; } = 0.80;
     public string TemplateImagePath { get; init; } = string.Empty;

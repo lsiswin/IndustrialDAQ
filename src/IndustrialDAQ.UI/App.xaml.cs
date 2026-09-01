@@ -68,6 +68,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<CalculationResourceSynchronizer>();
         containerRegistry.RegisterSingleton<IVisionConfigurationRepository, VisionConfigurationRepository>();
         containerRegistry.RegisterSingleton<IVisionInspectionAlgorithm, CapPresenceTemplateAlgorithm>();
+        containerRegistry.RegisterSingleton<IVisionInspectionAlgorithm, VisionOperatorPipelineAlgorithm>();
         containerRegistry.RegisterSingleton<IHikvisionCameraDiscoveryService, HikvisionCameraDiscoveryService>();
         containerRegistry.RegisterSingleton<VisionTemplateTeachingService>();
         containerRegistry.RegisterSingleton<VisionResultPublisher>();
