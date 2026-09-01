@@ -21,6 +21,10 @@ using IndustrialDAQ.Infrastructure.Processing;
 using IndustrialDAQ.Processing;
 using IndustrialDAQ.Storage;
 using IndustrialDAQ.Trend;
+using IndustrialDAQ.Vision.Abstractions;
+using IndustrialDAQ.Vision.Algorithms;
+using IndustrialDAQ.Vision.Runtime;
+using IndustrialDAQ.Vision.Storage;
 using IndustrialDAQ.UI.ViewModels;
 using IndustrialDAQ.UI.Views;
 using IndustrialDAQ.UI.Services;
@@ -61,6 +65,14 @@ public partial class App : PrismApplication
         containerRegistry.RegisterSingleton<DataProcessor>();
         containerRegistry.RegisterSingleton<CalculationRuleRepository>();
         containerRegistry.RegisterSingleton<CalculationResourceSynchronizer>();
+        containerRegistry.RegisterSingleton<IVisionConfigurationRepository, VisionConfigurationRepository>();
+        containerRegistry.RegisterSingleton<IVisionInspectionAlgorithm, CapPresenceTemplateAlgorithm>();
+        containerRegistry.RegisterSingleton<VisionTemplateTeachingService>();
+        containerRegistry.RegisterSingleton<VisionResultPublisher>();
+        containerRegistry.RegisterSingleton<VisionResourceSynchronizer>();
+        containerRegistry.RegisterInstance(new NgImageStorageService(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IndustrialDAQ", "Vision", "NG")));
+        containerRegistry.RegisterSingleton<VisionInspectionEngine>();
         containerRegistry.RegisterSingleton<MainWindowViewModel>();
 
         // 报警系统服务（统一走新链路，AlarmManager 仅作为 UI 兼容门面）
@@ -227,6 +239,7 @@ public partial class App : PrismApplication
         _ = historyWriter.StartAsync(CancellationToken.None);
         _ = dataProcessor.StartAsync(CancellationToken.None);
         _ = LoadCalculationRulesAsync(dataProcessor);
+        _ = Container.Resolve<VisionInspectionEngine>().StartAsync(CancellationToken.None);
 
         // ── 启动报警系统 ──
         var alarmManager = Container.Resolve<AlarmManager>();

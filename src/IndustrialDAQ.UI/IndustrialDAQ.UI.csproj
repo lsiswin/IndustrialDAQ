@@ -8,6 +8,7 @@
     <ProjectReference Include="..\IndustrialDAQ.Processing\IndustrialDAQ.Processing.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Storage\IndustrialDAQ.Storage.csproj" />
     <ProjectReference Include="..\IndustrialDAQ.Trend\IndustrialDAQ.Trend.csproj" />
+    <ProjectReference Include="..\IndustrialDAQ.Vision\IndustrialDAQ.Vision.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.Modbus\Drivers.Modbus.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.Mqtt\Drivers.Mqtt.csproj" />
     <ProjectReference Include="..\..\Plugins\Drivers.OpcUA\Drivers.OpcUA.csproj" />
