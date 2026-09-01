@@ -13,13 +13,15 @@ public sealed class VisionOperatorPipelineTests
         var templatePath = Path.Combine(root, "template.png");
         var passBytes = CreatePartImage(true);
         var ngBytes = CreatePartImage(false);
-        var roi = new VisionRoi(0.2, 0.2, 0.6, 0.6);
+        var templateRoi = new VisionRoi(0.30, 0.25, 0.40, 0.40);
         await new VisionTemplateTeachingService().CreateTemplateAsync(
-            new VisionFrame("teach", "camera", passBytes, DateTimeOffset.UtcNow), roi, templatePath);
+            new VisionFrame("teach", "camera", passBytes, DateTimeOffset.UtcNow), templateRoi, templatePath);
         var roiOperator = VisionOperatorCatalog.Find("RoiCrop").CreateDefault(0);
-        roiOperator.Parameters["X"] = "0.2"; roiOperator.Parameters["Y"] = "0.2";
-        roiOperator.Parameters["Width"] = "0.6"; roiOperator.Parameters["Height"] = "0.6";
+        roiOperator.Parameters["X"] = "0.1"; roiOperator.Parameters["Y"] = "0.1";
+        roiOperator.Parameters["Width"] = "0.8"; roiOperator.Parameters["Height"] = "0.8";
         var templateOperator = VisionOperatorCatalog.Find("TemplateMatch").CreateDefault(1);
+        templateOperator.Parameters["X"] = "0.30"; templateOperator.Parameters["Y"] = "0.25";
+        templateOperator.Parameters["Width"] = "0.40"; templateOperator.Parameters["Height"] = "0.40";
         templateOperator.Parameters["TemplatePath"] = templatePath;
         templateOperator.Parameters["MinScore"] = "0.92";
         var task = new VisionInspectionTask

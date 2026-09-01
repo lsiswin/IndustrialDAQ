@@ -103,8 +103,18 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             RemoveOperatorCommand.RaiseCanExecuteChanged();
             MoveUpCommand.RaiseCanExecuteChanged();
             MoveDownCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(CanDrawRegion));
+            RaisePropertyChanged(nameof(SelectionInstruction));
         }
     }
+
+    public bool CanDrawRegion => SelectedOperator?.OperatorType is "RoiCrop" or "TemplateMatch";
+    public string SelectionInstruction => SelectedOperator?.OperatorType switch
+    {
+        "RoiCrop" => "在左侧图像拖动鼠标，框选任务搜索区域（蓝框）",
+        "TemplateMatch" => "在左侧图像拖动鼠标，框选需要教学的特征模板（橙框）",
+        _ => "当前算子使用右侧标量参数，不需要图像框选"
+    };
 
     public bool UsesDirectorySource => SelectedCameraSource.DriverType != VisionCameraDriverTypes.HikvisionMvs;
     public bool UsesHikvisionMvs => SelectedCameraSource.DriverType == VisionCameraDriverTypes.HikvisionMvs;
@@ -201,6 +211,10 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         roi.Parameters["Width"] = task.Roi.Width.ToString(CultureInfo.InvariantCulture);
         roi.Parameters["Height"] = task.Roi.Height.ToString(CultureInfo.InvariantCulture);
         var template = VisionOperatorCatalog.Find("TemplateMatch").CreateDefault(1);
+        template.Parameters["X"] = task.Roi.X.ToString(CultureInfo.InvariantCulture);
+        template.Parameters["Y"] = task.Roi.Y.ToString(CultureInfo.InvariantCulture);
+        template.Parameters["Width"] = task.Roi.Width.ToString(CultureInfo.InvariantCulture);
+        template.Parameters["Height"] = task.Roi.Height.ToString(CultureInfo.InvariantCulture);
         template.Parameters["TemplatePath"] = task.TemplateImagePath;
         template.Parameters["MinScore"] = task.MatchThreshold.ToString(CultureInfo.InvariantCulture);
         return [roi, template];
@@ -274,7 +288,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             var templateOperator = Operators.FirstOrDefault(item => item.OperatorType == "TemplateMatch");
             if (templateOperator is not null)
             {
-                var templatePath = await _teachingService.CreateTemplateAsync(frame, RecipeRoi(),
+                ValidateTemplateRegion();
+                var templatePath = await _teachingService.CreateTemplateAsync(frame, TemplateRoi(),
                     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IndustrialDAQ", "Vision", "Templates", _taskId, "template.png"));
                 templateOperator.SetParameter("TemplatePath", templatePath);
             }
@@ -292,8 +307,12 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             if (!_authManager.CanModify) throw new UnauthorizedAccessException("当前账号无权修改视觉配置。");
             if (Operators.Count == 0) throw new InvalidOperationException("请至少添加一个视觉算子。");
             var template = Operators.FirstOrDefault(item => item.OperatorType == "TemplateMatch");
-            if (template is not null && !File.Exists(template.ParameterValue("TemplatePath")))
-                throw new InvalidOperationException("配方包含模板匹配，请先点击“采集模板并测试”。");
+            if (template is not null)
+            {
+                ValidateTemplateRegion();
+                if (!File.Exists(template.ParameterValue("TemplatePath")))
+                    throw new InvalidOperationException("配方包含模板匹配，请先点击“采集模板并测试”。");
+            }
             var camera = BuildCamera();
             var task = BuildTask();
             await _repository.UpsertCameraAsync(camera);
@@ -356,6 +375,46 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
             Parse(roi.ParameterValue("Width"), 1), Parse(roi.ParameterValue("Height"), 1));
     }
 
+    public VisionRoi? GetRegion(string operatorType)
+    {
+        var item = Operators.FirstOrDefault(operatorItem => operatorItem.OperatorType == operatorType);
+        return item is null ? null : RegionFrom(item);
+    }
+
+    public void SetSelectedRegion(VisionRoi region)
+    {
+        if (!CanDrawRegion || SelectedOperator is null || !region.IsValid) return;
+        SelectedOperator.SetParameter("X", region.X.ToString("0.####", CultureInfo.InvariantCulture));
+        SelectedOperator.SetParameter("Y", region.Y.ToString("0.####", CultureInfo.InvariantCulture));
+        SelectedOperator.SetParameter("Width", region.Width.ToString("0.####", CultureInfo.InvariantCulture));
+        SelectedOperator.SetParameter("Height", region.Height.ToString("0.####", CultureInfo.InvariantCulture));
+        // 模板区域改变后旧模板立即失效，必须重新教学才能发布。
+        if (SelectedOperator.OperatorType == "TemplateMatch") SelectedOperator.SetParameter("TemplatePath", string.Empty);
+        StatusText = SelectedOperator.OperatorType == "RoiCrop" ? "ROI 搜索区域已更新" : "模板教学区域已更新";
+    }
+
+    private VisionRoi TemplateRoi()
+    {
+        var item = Operators.FirstOrDefault(operatorItem => operatorItem.OperatorType == "TemplateMatch");
+        return item is null ? RecipeRoi() : RegionFrom(item);
+    }
+
+    private static VisionRoi RegionFrom(VisionOperatorEditorItem item) => new(
+        Parse(item.ParameterValue("X"), 0), Parse(item.ParameterValue("Y"), 0),
+        Parse(item.ParameterValue("Width"), 1), Parse(item.ParameterValue("Height"), 1));
+
+    private void ValidateTemplateRegion()
+    {
+        var search = RecipeRoi();
+        var template = TemplateRoi();
+        if (!template.IsValid) throw new InvalidOperationException("模板框选区域无效，请重新框选。");
+        if (Operators.Any(item => item.OperatorType == "RoiCrop") &&
+            (template.X < search.X || template.Y < search.Y ||
+             template.X + template.Width > search.X + search.Width ||
+             template.Y + template.Height > search.Y + search.Height))
+            throw new InvalidOperationException("模板区域必须位于 ROI 搜索区域内部。");
+    }
+
     private string ResultPath(VisionCameraConfig camera, VisionInspectionTask task) => $"Vision/{Segment(camera.Name)}/{Segment(task.Name)}/Result/Pass";
     private static string Segment(string value) => value.Trim().Replace('/', '-').Replace('\\', '-');
     private static double Parse(string? value, double fallback) => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) ? number : fallback;
@@ -399,6 +458,7 @@ public sealed class VisionOperatorEditorItem : BindableBase
     public string Category { get; }
     public string Description { get; }
     public ObservableCollection<VisionOperatorParameterEditor> Parameters { get; } = [];
+    public IEnumerable<VisionOperatorParameterEditor> EditableParameters => Parameters.Where(item => !IsGraphicalParameter(item.Name));
     public int Order { get => _order; set => SetProperty(ref _order, value); }
 
     public VisionOperatorEditorItem(VisionOperatorDefinition definition)
@@ -421,6 +481,7 @@ public sealed class VisionOperatorEditorItem : BindableBase
         var parameter = Parameters.FirstOrDefault(item => item.Name == name);
         if (parameter is not null) parameter.Value = value;
     }
+    private static bool IsGraphicalParameter(string name) => name is "X" or "Y" or "Width" or "Height" or "TemplatePath";
     public VisionOperatorDefinition ToDefinition(int order) => new()
     {
         OperatorId = OperatorId, OperatorType = OperatorType, DisplayName = DisplayName, Order = order, IsEnabled = true,

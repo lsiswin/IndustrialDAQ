@@ -26,11 +26,9 @@ public sealed class VisionConfigurationRepositoryTests
         {
             TaskId = "cap-task", CameraId = "cap-camera", Name = "瓶盖有无",
             AlgorithmType = VisionOperatorPipelineAlgorithm.TypeName,
-            Operators =
-            [
-                VisionOperatorCatalog.Find("Grayscale").CreateDefault(0),
-                VisionOperatorCatalog.Find("Brightness").CreateDefault(1)
-            ],
+            Operators = [VisionOperatorCatalog.Find("Grayscale").CreateDefault(0),
+                VisionOperatorCatalog.Find("Brightness").CreateDefault(1),
+                VisionOperatorCatalog.Find("TemplateMatch").CreateDefault(2)],
             Roi = new VisionRoi(0.2, 0.2, 0.5, 0.5), MatchThreshold = 0.86,
             TemplateImagePath = "templates/cap.png"
         });
@@ -49,7 +47,8 @@ public sealed class VisionConfigurationRepositoryTests
         Assert.Equal(0.86, task.MatchThreshold);
         Assert.Equal(0.2, task.Roi.X);
         Assert.Equal(VisionOperatorPipelineAlgorithm.TypeName, task.AlgorithmType);
-        Assert.Equal(["Grayscale", "Brightness"], task.Operators.Select(item => item.OperatorType));
+        Assert.Equal(["Grayscale", "Brightness", "TemplateMatch"], task.Operators.Select(item => item.OperatorType));
+        Assert.Equal("0.35", task.Operators[2].Parameters["X"]);
 
         await repository.DeleteTaskAsync(task.TaskId);
         Assert.Empty(await repository.LoadTasksAsync());
