@@ -82,6 +82,7 @@ public class MainWindowViewModel : BindableBase
                 "DeviceDetail" => "DeviceDetailView",
                 "AlarmRecord" => "AlarmRecordView",
                 "Trend" => "TrendView",
+                "VisionInspection" => "VisionInspectionView",
                 "DeviceTemplate" => "DeviceTemplateView",
                 "SystemSettings" => "SystemSettingsView",
                 _ => page
@@ -94,6 +95,7 @@ public class MainWindowViewModel : BindableBase
                 "DeviceDetail" => "数据点详情",
                 "AlarmRecord" => "警报日志",
                 "Trend" => "趋势监控",
+                "VisionInspection" => "机器视觉检测",
                 "DeviceTemplate" => "设备模板",
                 "SystemSettings" => "系统设置",
                 _ => page

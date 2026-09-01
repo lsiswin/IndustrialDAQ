@@ -1,0 +1,33 @@
+<UserControl x:Class="IndustrialDAQ.UI.Views.VisionTaskDialog"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:prism="http://prismlibrary.com/"
+             prism:ViewModelLocator.AutoWireViewModel="True"
+             Width="860" Height="650" Background="Transparent">
+    <Border Background="{DynamicResource CardBgBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="22">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid><StackPanel><TextBlock Text="瓶盖检测任务向导" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/><TextBlock Text="选择样图目录 → 设置 ROI → 教学验证 → 发布任务" Foreground="{DynamicResource TextMutedBrush}" Margin="0,5,0,14"/></StackPanel><Button Content="✕" Command="{Binding CancelCommand}" Width="32" Height="32" HorizontalAlignment="Right" VerticalAlignment="Top" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextPrimaryBrush}"/></Grid>
+            <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="1.05*"/><ColumnDefinition Width="1.35*"/></Grid.ColumnDefinitions>
+                <Border Background="{DynamicResource BrushBgSecondary}" CornerRadius="6" Margin="0,0,14,0" Padding="10">
+                    <Grid><Image Source="{Binding PreviewImage}" Stretch="Uniform"/><TextBlock Text="首张图片预览" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,8"/></Grid>
+                </Border>
+                <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"><StackPanel>
+                    <TextBlock Text="① 相机与任务" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,0,0,8"/>
+                    <TextBlock Text="相机名称" Foreground="{DynamicResource TextSecondaryBrush}"/><TextBox Text="{Binding CameraName, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,8" Padding="8"/>
+                    <TextBlock Text="任务名称 / 产品编码" Foreground="{DynamicResource TextSecondaryBrush}"/><Grid Margin="0,4,0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><TextBox Text="{Binding TaskName}" Padding="8" Margin="0,0,4,0"/><TextBox Grid.Column="1" Text="{Binding ProductCode}" Padding="8" Margin="4,0,0,0"/></Grid>
+                    <TextBlock Text="② 图片目录" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,8,0,6"/>
+                    <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox Text="{Binding ImageDirectory}" IsReadOnly="True" Padding="8"/><Button Grid.Column="1" Content="浏览" Command="{Binding BrowseCommand}" Padding="15,7" Margin="8,0,0,0"/></Grid>
+                    <Grid Margin="0,8"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="帧间隔 ms" Foreground="{DynamicResource TextSecondaryBrush}"/><TextBox Text="{Binding IntervalMilliseconds}" Padding="8" Margin="0,4,4,0"/></StackPanel><CheckBox Grid.Column="1" Content="循环播放" IsChecked="{Binding Loop}" VerticalAlignment="Bottom" Margin="12,0,0,8"/></Grid>
+                    <TextBlock Text="③ ROI（0 到 1 归一化坐标）" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,8,0,6"/>
+                    <UniformGrid Columns="4"><StackPanel Margin="0,0,4,0"><TextBlock Text="X"/><TextBox Text="{Binding RoiX}" Padding="6"/></StackPanel><StackPanel Margin="4,0"><TextBlock Text="Y"/><TextBox Text="{Binding RoiY}" Padding="6"/></StackPanel><StackPanel Margin="4,0"><TextBlock Text="宽"/><TextBox Text="{Binding RoiWidth}" Padding="6"/></StackPanel><StackPanel Margin="4,0,0,0"><TextBlock Text="高"/><TextBox Text="{Binding RoiHeight}" Padding="6"/></StackPanel></UniformGrid>
+                    <TextBlock Text="④ 匹配阈值" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,12,0,4"/><DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding ThresholdText}" Foreground="{DynamicResource InfoBrush}" FontWeight="Bold" Margin="8,0"/><Slider Minimum="0.1" Maximum="1" Value="{Binding Threshold}" TickFrequency="0.01"/></DockPanel>
+                    <CheckBox Content="NG 原图自动保存" IsChecked="{Binding SaveNgImage}" Margin="0,10,0,0"/>
+                    <Button Content="教学并测试当前合格样图" Command="{Binding TeachCommand}" Padding="12,9" Margin="0,12,0,0" Background="{DynamicResource InfoBrush}" Foreground="White" BorderThickness="0"/>
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,10,0,0"/>
+                </StackPanel></ScrollViewer>
+            </Grid>
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0"><Button Content="取消" Command="{Binding CancelCommand}" Padding="20,8" Margin="0,0,8,0"/><Button Content="发布任务并注册报警" Command="{Binding SaveCommand}" Padding="20,8" Background="{DynamicResource SuccessBrush}" Foreground="White" BorderThickness="0"/></StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

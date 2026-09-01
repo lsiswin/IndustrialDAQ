@@ -24,6 +24,7 @@ public sealed class VisionInspectionEngine : IHostedService
     private CancellationTokenSource? _cts;
     private List<Task> _cameraLoops = [];
     private readonly HashSet<string> _registeredTagIds = new(StringComparer.OrdinalIgnoreCase);
+    private volatile bool _isPaused;
 
     public VisionInspectionEngine(
         IVisionConfigurationRepository repository,
@@ -44,6 +45,11 @@ public sealed class VisionInspectionEngine : IHostedService
     }
 
     public event EventHandler<VisionInspectionResult>? ResultProduced;
+    public event EventHandler<VisionInspectionCompletedEventArgs>? InspectionCompleted;
+    public bool IsPaused => _isPaused;
+
+    public void Pause() => _isPaused = true;
+    public void Resume() => _isPaused = false;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -120,7 +126,10 @@ public sealed class VisionInspectionEngine : IHostedService
         try
         {
             await foreach (var frame in driver.CaptureAsync(cancellationToken))
+            {
+                if (_isPaused) continue;
                 foreach (var task in tasks) await InspectAsync(frame, task, cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception ex)
@@ -143,6 +152,7 @@ public sealed class VisionInspectionEngine : IHostedService
         await _repository.SaveResultAsync(result, cancellationToken);
         await _publisher.PublishResultAsync(task, result, cancellationToken);
         ResultProduced?.Invoke(this, result);
+        InspectionCompleted?.Invoke(this, new VisionInspectionCompletedEventArgs(frame, result));
         return result;
     }
 
@@ -159,4 +169,13 @@ public sealed class VisionInspectionEngine : IHostedService
         ProcessingTimeMilliseconds = source.ProcessingTimeMilliseconds,
         ImagePath = imagePath, FailureReason = source.FailureReason
     };
+}
+
+/// <summary>携带原图和检测结果的 UI 通知，运行时持久化仍只保存结果与 NG 路径。</summary>
+public sealed class VisionInspectionCompletedEventArgs : EventArgs
+{
+    public VisionFrame Frame { get; }
+    public VisionInspectionResult Result { get; }
+    public VisionInspectionCompletedEventArgs(VisionFrame frame, VisionInspectionResult result) =>
+        (Frame, Result) = (frame, result);
 }

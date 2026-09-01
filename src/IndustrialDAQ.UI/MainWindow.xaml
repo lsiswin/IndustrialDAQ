@@ -217,6 +217,15 @@
                             </StackPanel>
                         </RadioButton>
 
+                        <!-- 机器视觉检测入口 -->
+                        <RadioButton Style="{StaticResource NavRadioButtonStyle}"
+                                     Command="{Binding NavigateCommand}" CommandParameter="VisionInspection">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="◉" FontSize="16" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <TextBlock Text="机器视觉" FontSize="14" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+
                         <!-- 设备模板 -->
                         <RadioButton Style="{StaticResource NavRadioButtonStyle}"
                                      Command="{Binding NavigateCommand}" CommandParameter="DeviceTemplate">

@@ -13,6 +13,9 @@ public sealed class VisionResultPublisher
 
     public VisionResultPublisher(AcquisitionChannel channel) => _channel = channel;
 
+    /// <summary>清零指定任务的运行统计，不删除历史检测记录。</summary>
+    public void ResetStatistics(string taskId) => _statistics.TryRemove(taskId, out _);
+
     public async Task PublishStatusAsync(VisionInspectionTask task, bool connected, bool running, CancellationToken cancellationToken = default)
     {
         await PublishAsync(VisionTagCatalog.Connected(task.TaskId), "Camera.Connected", connected, cancellationToken);

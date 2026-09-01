@@ -123,12 +123,14 @@ public partial class App : PrismApplication
         // ViewModel 注册（支持构造函数注入）
         containerRegistry.Register<AlarmRecordViewModel>();
         containerRegistry.Register<TrendViewModel>();
+        containerRegistry.Register<VisionInspectionViewModel>();
 
         containerRegistry.RegisterForNavigation<DashboardView>();
         containerRegistry.RegisterForNavigation<ProductionMonitorView>();
         containerRegistry.RegisterForNavigation<DeviceDetailView>();
         containerRegistry.RegisterForNavigation<AlarmRecordView>();
         containerRegistry.RegisterForNavigation<TrendView>();
+        containerRegistry.RegisterForNavigation<VisionInspectionView>();
         containerRegistry.RegisterForNavigation<DeviceTemplateView>();
         containerRegistry.RegisterForNavigation<SystemSettingsView>();
         // 报警规则只通过“系统设置/报警规则”进入，避免出现多个配置入口。
@@ -139,6 +141,7 @@ public partial class App : PrismApplication
         containerRegistry.RegisterDialog<AddDeviceTemplateDialog, AddDeviceTemplateDialogViewModel>();
         containerRegistry.RegisterDialog<LoginDialog, LoginDialogViewModel>();
         containerRegistry.RegisterDialog<RegisterDialog, RegisterDialogViewModel>();
+        containerRegistry.RegisterDialog<VisionTaskDialog, VisionTaskDialogViewModel>();
     }
 
     protected override IContainerExtension CreateContainerExtension()
