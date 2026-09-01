@@ -1,4 +1,5 @@
 using IndustrialDAQ.Infrastructure;
+using IndustrialDAQ.Vision.Algorithms;
 using IndustrialDAQ.Vision.Models;
 using IndustrialDAQ.Vision.Storage;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,12 @@ public sealed class VisionConfigurationRepositoryTests
         await repository.UpsertTaskAsync(new VisionInspectionTask
         {
             TaskId = "cap-task", CameraId = "cap-camera", Name = "瓶盖有无",
+            AlgorithmType = VisionOperatorPipelineAlgorithm.TypeName,
+            Operators =
+            [
+                VisionOperatorCatalog.Find("Grayscale").CreateDefault(0),
+                VisionOperatorCatalog.Find("Brightness").CreateDefault(1)
+            ],
             Roi = new VisionRoi(0.2, 0.2, 0.5, 0.5), MatchThreshold = 0.86,
             TemplateImagePath = "templates/cap.png"
         });
@@ -41,6 +48,8 @@ public sealed class VisionConfigurationRepositoryTests
         Assert.Equal("192.168.1.88", camera.DeviceIpAddress);
         Assert.Equal(0.86, task.MatchThreshold);
         Assert.Equal(0.2, task.Roi.X);
+        Assert.Equal(VisionOperatorPipelineAlgorithm.TypeName, task.AlgorithmType);
+        Assert.Equal(["Grayscale", "Brightness"], task.Operators.Select(item => item.OperatorType));
 
         await repository.DeleteTaskAsync(task.TaskId);
         Assert.Empty(await repository.LoadTasksAsync());

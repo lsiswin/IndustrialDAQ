@@ -179,7 +179,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     {
         // 默认配方覆盖典型瓶盖有无检测，用户仍可逐个增删算子。
         Operators.Clear();
-        foreach (var type in new[] { "RoiCrop", "Grayscale", "GaussianBlur", "TemplateMatch" })
+        foreach (var type in new[] { "RoiCrop", "TemplateMatch" })
             Operators.Add(new VisionOperatorEditorItem(VisionOperatorCatalog.Find(type).CreateDefault(Operators.Count)));
         SelectedAvailableOperator = AvailableOperators[0];
         SelectedOperator = Operators[0];
@@ -200,10 +200,10 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         roi.Parameters["Y"] = task.Roi.Y.ToString(CultureInfo.InvariantCulture);
         roi.Parameters["Width"] = task.Roi.Width.ToString(CultureInfo.InvariantCulture);
         roi.Parameters["Height"] = task.Roi.Height.ToString(CultureInfo.InvariantCulture);
-        var template = VisionOperatorCatalog.Find("TemplateMatch").CreateDefault(3);
+        var template = VisionOperatorCatalog.Find("TemplateMatch").CreateDefault(1);
         template.Parameters["TemplatePath"] = task.TemplateImagePath;
         template.Parameters["MinScore"] = task.MatchThreshold.ToString(CultureInfo.InvariantCulture);
-        return [roi, VisionOperatorCatalog.Find("Grayscale").CreateDefault(1), VisionOperatorCatalog.Find("GaussianBlur").CreateDefault(2), template];
+        return [roi, template];
     }
 
     private void AddOperator()

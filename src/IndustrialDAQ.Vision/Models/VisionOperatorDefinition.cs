@@ -42,7 +42,7 @@ public static class VisionOperatorCatalog
         new("BinaryThreshold", "二值化", "图像分割", "按灰度阈值分离前景和背景。",
         [P("Threshold", "灰度阈值", "128", "范围 0 到 255"), P("Invert", "黑白反转", "false", "true 时反转前景背景")]),
         new("TemplateMatch", "模板匹配", "定位与检测", "将当前图像与教学模板比较。",
-        [P("TemplatePath", "模板路径", "", "通过“采集模板”自动生成"), P("MinScore", "最低分数", "0.80", "范围 0 到 1")]),
+        [P("TemplatePath", "模板路径", "", "通过“采集模板”自动生成"), P("MinScore", "最低分数", "0.92", "范围 0 到 1，建议从 0.92 开始调试")]),
         new("BlobCount", "斑点计数", "缺陷检测", "统计二值图中的连通区域数量和面积。",
         [P("MinArea", "最小面积", "100", "忽略更小噪点"), P("MaxArea", "最大面积", "100000", "忽略过大区域"), P("MinCount", "最少数量", "1", "合格数量下限"), P("MaxCount", "最多数量", "1", "合格数量上限")]),
         new("EdgeDensity", "边缘密度", "缺陷检测", "使用 Canny 边缘占比判断轮廓是否完整。",
