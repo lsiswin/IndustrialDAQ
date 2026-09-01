@@ -80,6 +80,11 @@
                     <TextBlock Text="③ 当前算子参数" FontWeight="Bold" Foreground="{DynamicResource InfoBrush}" Margin="0,12,0,6"/>
                     <TextBlock Text="{Binding SelectedOperator.Description}" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap"/>
                     <Button Content="{Binding RegionSelectionButtonText}" Command="{Binding StartRegionSelectionCommand}" Visibility="{Binding CanDrawRegion, Converter={StaticResource BoolToVisibility}}" Padding="12,9" Margin="0,7,0,0" Background="#0E7490" Foreground="White" BorderThickness="0"/>
+                    <TextBlock Text="当前算子完整参数" Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,9,0,4"/>
+                    <DataGrid ItemsSource="{Binding SelectedOperator.DetailedParameters}" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" Height="120" HeadersVisibility="Column">
+                        <DataGrid.Columns><DataGridTextColumn Header="参数" Binding="{Binding DisplayName}" Width="120"/><DataGridTextColumn Header="当前值" Binding="{Binding Value}" Width="150"/><DataGridTextColumn Header="用途说明" Binding="{Binding Help}" Width="*"/></DataGrid.Columns>
+                    </DataGrid>
+                    <TextBlock Text="可调整参数" Foreground="{DynamicResource TextSecondaryBrush}" FontWeight="SemiBold" Margin="0,9,0,4"/>
                     <DataGrid ItemsSource="{Binding SelectedOperator.EditableParameters}" AutoGenerateColumns="False" CanUserAddRows="False" Height="145" Margin="0,6,0,0" HeadersVisibility="Column">
                         <DataGrid.Columns><DataGridTextColumn Header="参数" Binding="{Binding DisplayName}" IsReadOnly="True" Width="120"/><DataGridTextColumn Header="值" Binding="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Width="150"/><DataGridTextColumn Header="说明" Binding="{Binding Help}" IsReadOnly="True" Width="*"/></DataGrid.Columns>
                     </DataGrid>
@@ -88,7 +93,11 @@
                     <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,0"/>
                 </StackPanel></ScrollViewer>
             </Grid>
-            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0"><Button Content="返回工作台" Command="{Binding CancelCommand}" Padding="20,8" Margin="0,0,8,0"/><Button Content="发布视觉任务" Command="{Binding SaveCommand}" Padding="20,8" Background="{DynamicResource SuccessBrush}" Foreground="White" BorderThickness="0"/></StackPanel>
+            <Grid Grid.Row="2" Margin="0,16,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,24,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="返回工作台" Command="{Binding CancelCommand}" Padding="20,8" Margin="0,0,8,0"/><Button Content="{Binding SaveButtonText}" Command="{Binding SaveCommand}" Padding="20,8" Background="{DynamicResource SuccessBrush}" Foreground="White" BorderThickness="0"/></StackPanel>
+            </Grid>
         </Grid>
     </Border>
 </UserControl>

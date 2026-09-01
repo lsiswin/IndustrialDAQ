@@ -37,6 +37,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase
     private BitmapImage? _previewImage;
     private VisionFrame? _teachingFrame;
     private string _statusText = "选择相机后，按顺序添加视觉算子";
+    private bool _isSaving;
 
     public string Title => "配置视觉任务";
     public string TaskName { get => _taskName; set => SetProperty(ref _taskName, value); }
@@ -58,6 +59,17 @@ public sealed class VisionTaskDialogViewModel : BindableBase
     public bool HasPreviewImage => PreviewImage is not null;
     public bool HasNoPreviewImage => !HasPreviewImage;
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
+    public bool IsSaving
+    {
+        get => _isSaving;
+        private set
+        {
+            if (!SetProperty(ref _isSaving, value)) return;
+            RaisePropertyChanged(nameof(SaveButtonText));
+            SaveCommand.RaiseCanExecuteChanged();
+        }
+    }
+    public string SaveButtonText => IsSaving ? "正在发布..." : "发布视觉任务";
     public IReadOnlyList<VisionOperatorDescriptor> AvailableOperators { get; } = VisionOperatorCatalog.Common;
     public ObservableCollection<VisionCameraConfig> ExistingCameras { get; } = [];
     public ObservableCollection<VisionOperatorEditorItem> Operators { get; } = [];
@@ -157,7 +169,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase
         StartRegionSelectionCommand = new DelegateCommand(BeginRegionSelection, () => CanStartRegionSelection);
         RefreshTeachingFrameCommand = new DelegateCommand(async () => await LoadPreviewAsync(true), () => SelectedCamera is not null);
         TeachCommand = new DelegateCommand(async () => await TeachAndTestAsync());
-        SaveCommand = new DelegateCommand(async () => await SaveAsync());
+        SaveCommand = new DelegateCommand(async () => await SaveAsync(), () => !IsSaving);
         CancelCommand = new DelegateCommand(() => EditorClosed?.Invoke(this, new VisionTaskEditorClosedEventArgs(false, null)));
         LoadRecommendedRecipe();
     }
@@ -203,7 +215,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase
         // 默认配方覆盖典型瓶盖有无检测，用户仍可逐个增删算子。
         Operators.Clear();
         foreach (var type in new[] { "RoiCrop", "TemplateMatch" })
-            Operators.Add(new VisionOperatorEditorItem(VisionOperatorCatalog.Find(type).CreateDefault(Operators.Count)));
+            Operators.Add(new VisionOperatorEditorItem(VisionOperatorCatalog.Find(type).CreateDefault(Operators.Count), false));
         SelectedAvailableOperator = AvailableOperators[0];
         SelectedOperator = Operators[0];
     }
@@ -212,7 +224,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase
     {
         Operators.Clear();
         var definitions = task.Operators.Count > 0 ? task.Operators : LegacyRecipe(task);
-        foreach (var definition in definitions.OrderBy(item => item.Order)) Operators.Add(new VisionOperatorEditorItem(definition));
+        // 每次进入编辑页都先隐藏历史区域框，只有本次主动框选后才显示，避免误认为已进入框选状态。
+        foreach (var definition in definitions.OrderBy(item => item.Order)) Operators.Add(new VisionOperatorEditorItem(definition, false));
         SelectedOperator = Operators.FirstOrDefault();
     }
 
@@ -236,7 +249,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase
     private void AddOperator()
     {
         if (SelectedAvailableOperator is null) return;
-        var item = new VisionOperatorEditorItem(SelectedAvailableOperator.CreateDefault(Operators.Count));
+        var item = new VisionOperatorEditorItem(SelectedAvailableOperator.CreateDefault(Operators.Count), false);
         Operators.Add(item);
         SelectedOperator = item;
         StatusText = $"已添加“{item.DisplayName}”，可修改默认参数";
@@ -311,6 +324,9 @@ public sealed class VisionTaskDialogViewModel : BindableBase
 
     private async Task SaveAsync()
     {
+        if (IsSaving) return;
+        IsSaving = true;
+        StatusText = "正在校验配方并发布，请稍候...";
         try
         {
             if (!_authManager.CanModify) throw new UnauthorizedAccessException("当前账号无权修改视觉配置。");
@@ -331,7 +347,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase
                 "VisionTaskSaved", ResultPath(camera, task), $"Operators={task.Operators.Count};Product={task.ProductCode}", true);
             EditorClosed?.Invoke(this, new VisionTaskEditorClosedEventArgs(true, task.TaskId));
         }
-        catch (Exception ex) { StatusText = "发布失败：" + ex.Message; }
+        catch (Exception ex) { StatusText = "发布失败：" + ex.GetBaseException().Message; }
+        finally { IsSaving = false; }
     }
 
     private async Task ProvisionAlarmAsync(VisionCameraConfig camera, VisionInspectionTask task)
@@ -379,7 +396,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase
     public VisionRoi? GetRegion(string operatorType)
     {
         var item = Operators.FirstOrDefault(operatorItem => operatorItem.OperatorType == operatorType);
-        return item is null ? null : RegionFrom(item);
+        // 新增算子的全图默认值仅供算法兜底，用户实际框选前不在教学图上绘制区域框。
+        return item is null || !item.HasSelectedRegion ? null : RegionFrom(item);
     }
 
     public void SetSelectedRegion(VisionRoi region)
@@ -389,6 +407,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase
         SelectedOperator.SetParameter("Y", region.Y.ToString("0.####", CultureInfo.InvariantCulture));
         SelectedOperator.SetParameter("Width", region.Width.ToString("0.####", CultureInfo.InvariantCulture));
         SelectedOperator.SetParameter("Height", region.Height.ToString("0.####", CultureInfo.InvariantCulture));
+        SelectedOperator.HasSelectedRegion = true;
         // 模板区域改变后旧模板立即失效，必须重新教学才能发布。
         if (SelectedOperator.OperatorType == "TemplateMatch") SelectedOperator.SetParameter("TemplatePath", string.Empty);
         StatusText = SelectedOperator.OperatorType == "RoiCrop" ? "ROI 搜索区域已更新" : "模板教学区域已更新";
@@ -496,6 +515,7 @@ public sealed class VisionTaskEditorClosedEventArgs(bool saved, string? taskId) 
 public sealed class VisionOperatorEditorItem : BindableBase
 {
     private int _order;
+    private bool _hasSelectedRegion;
     public string OperatorId { get; }
     public string OperatorType { get; }
     public string DisplayName { get; }
@@ -503,9 +523,11 @@ public sealed class VisionOperatorEditorItem : BindableBase
     public string Description { get; }
     public ObservableCollection<VisionOperatorParameterEditor> Parameters { get; } = [];
     public IEnumerable<VisionOperatorParameterEditor> EditableParameters => Parameters.Where(item => !IsGraphicalParameter(item.Name));
+    public IEnumerable<VisionOperatorParameterEditor> DetailedParameters => Parameters;
     public int Order { get => _order; set => SetProperty(ref _order, value); }
+    public bool HasSelectedRegion { get => _hasSelectedRegion; set => SetProperty(ref _hasSelectedRegion, value); }
 
-    public VisionOperatorEditorItem(VisionOperatorDefinition definition)
+    public VisionOperatorEditorItem(VisionOperatorDefinition definition, bool hasSelectedRegion)
     {
         var descriptor = VisionOperatorCatalog.Find(definition.OperatorType);
         OperatorId = definition.OperatorId;
@@ -514,6 +536,7 @@ public sealed class VisionOperatorEditorItem : BindableBase
         Category = descriptor.Category;
         Description = descriptor.Description;
         Order = definition.Order + 1;
+        HasSelectedRegion = hasSelectedRegion && definition.OperatorType is "RoiCrop" or "TemplateMatch";
         foreach (var parameter in descriptor.Parameters)
             Parameters.Add(new VisionOperatorParameterEditor(parameter.Name, parameter.DisplayName,
                 definition.Parameters.GetValueOrDefault(parameter.Name, parameter.DefaultValue), parameter.Help));
