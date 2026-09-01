@@ -21,5 +21,6 @@
     <Project Path="src/IndustrialDAQ.Storage/IndustrialDAQ.Storage.csproj" />
     <Project Path="src/IndustrialDAQ.Trend/IndustrialDAQ.Trend.csproj" />
     <Project Path="src/IndustrialDAQ.UI/IndustrialDAQ.UI.csproj" />
+    <Project Path="src/IndustrialDAQ.Vision/IndustrialDAQ.Vision.csproj" />
   </Folder>
 </Solution>
