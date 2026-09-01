@@ -12,6 +12,7 @@ IndustrialDAQ 是一个基于 .NET 8、WPF 和 Prism 构建的工业数据采集
 - **用户与权限**：账号、角色和关联关系独立持久化，按 `ResourcePath + Action` 执行动态授权。
 - **安全审计**：记录登录、登录失败、退出、权限变更、授权拒绝及数据点写入结果。
 - **数据加工**：计算规则持久化后热加载，支持表达式计算和虚拟数据点输出。
+- **机器视觉**：提供瓶盖有无检测 MVP，支持目录模拟相机、ROI 模板教学、NG 存图、动态数据点和报警联动。
 - **可靠存储**：支持 SQLite/PostgreSQL、历史保留清理、类型恢复、写入重试及死信回放。
 - **外部通知**：报警中心支持钉钉/企业微信兼容文本 Webhook 适配器。
 - **主题与响应式布局**：提供深色/浅色主题，并针对不同窗口尺寸调整首页卡片和业务页面布局。
@@ -63,6 +64,7 @@ src/
 ├── IndustrialDAQ.Storage         实时流和历史数据持久化
 ├── IndustrialDAQ.Alarm           规则工作流、报警状态机和报警中心
 ├── IndustrialDAQ.Trend           趋势数据服务
+├── IndustrialDAQ.Vision          相机驱动、视觉算法、任务运行时与视觉配置仓储
 └── IndustrialDAQ.Infrastructure  EF Core 仓储和数据库实体
 
 Plugins/
@@ -137,6 +139,7 @@ MQTT 驱动将数据点 `Address` 作为主题：读取时订阅主题并缓存�
 - `alarm-definitions.json`、`permission-policies.json`、`calculation-rules.json` 支持文件变更热加载。
 - 业务代码不得写死设备、数据点、菜单权限或报警判断条件。
 - 计算规则与报警规则完整流程见 [`docs/CALCULATION_AND_ALARM_RULES.md`](docs/CALCULATION_AND_ALARM_RULES.md)。
+- 瓶盖有无检测配置、运行链路和 ResourcePath 说明见 [`docs/MACHINE_VISION_CAP_MVP.md`](docs/MACHINE_VISION_CAP_MVP.md)。
 
 ## 验证
 
