@@ -1,4 +1,5 @@
 using System.IO;
+using System.Collections.ObjectModel;
 using System.Windows.Media.Imaging;
 using IndustrialDAQ.Alarm.RuleEngine;
 using IndustrialDAQ.Core.Models;
@@ -19,6 +20,7 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
 {
     private readonly IVisionConfigurationRepository _repository;
     private readonly VisionTemplateTeachingService _teachingService;
+    private readonly IHikvisionCameraDiscoveryService _hikvisionDiscovery;
     private readonly IVisionInspectionAlgorithm _algorithm;
     private readonly VisionInspectionEngine _engine;
     private readonly IAlarmDefinitionRepository _alarmRepository;
@@ -31,6 +33,10 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     private string _taskName = "瓶盖有无检测";
     private string _productCode = "CAP-MVP";
     private string _imageDirectory = string.Empty;
+    private string _deviceSerialNumber = string.Empty;
+    private string _deviceIpAddress = string.Empty;
+    private VisionCameraSourceOption _selectedCameraSource = CameraSourceOptions.All[1];
+    private HikvisionCameraCandidate? _selectedDiscoveredCamera;
     private int _intervalMilliseconds = 1000;
     private bool _loop = true;
     private double _roiX = 0.25, _roiY = 0.25, _roiWidth = 0.5, _roiHeight = 0.5;
@@ -42,6 +48,33 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
 
     public string Title => "配置瓶盖有无检测";
     public string CameraName { get => _cameraName; set => SetProperty(ref _cameraName, value); }
+    public IReadOnlyList<VisionCameraSourceOption> CameraSources { get; } = CameraSourceOptions.All;
+    public ObservableCollection<HikvisionCameraCandidate> DiscoveredCameras { get; } = [];
+    public VisionCameraSourceOption SelectedCameraSource
+    {
+        get => _selectedCameraSource;
+        set
+        {
+            if (!SetProperty(ref _selectedCameraSource, value)) return;
+            RaisePropertyChanged(nameof(UsesDirectorySource)); RaisePropertyChanged(nameof(UsesHikvisionMvs));
+            StatusText = value.DriverType == VisionCameraDriverTypes.HikvisionMvs
+                ? "点击“自动扫描海康相机”，可发现真实相机和 MVS 虚拟相机"
+                : "选择样图目录，目录中的图片将按文件名顺序模拟相机取流";
+        }
+    }
+    public HikvisionCameraCandidate? SelectedDiscoveredCamera
+    {
+        get => _selectedDiscoveredCamera;
+        set
+        {
+            if (!SetProperty(ref _selectedDiscoveredCamera, value) || value is null) return;
+            _deviceSerialNumber = value.SerialNumber; _deviceIpAddress = value.IpAddress;
+            CameraName = value.DisplayName;
+            StatusText = $"已选择{(value.IsVirtual ? "海康虚拟" : "海康")}相机：{value.DisplayText}";
+        }
+    }
+    public bool UsesDirectorySource => SelectedCameraSource.DriverType != VisionCameraDriverTypes.HikvisionMvs;
+    public bool UsesHikvisionMvs => SelectedCameraSource.DriverType == VisionCameraDriverTypes.HikvisionMvs;
     public string TaskName { get => _taskName; set => SetProperty(ref _taskName, value); }
     public string ProductCode { get => _productCode; set => SetProperty(ref _productCode, value); }
     public string ImageDirectory { get => _imageDirectory; set => SetProperty(ref _imageDirectory, value); }
@@ -57,20 +90,23 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
     public BitmapImage? PreviewImage { get => _previewImage; private set => SetProperty(ref _previewImage, value); }
     public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
     public DelegateCommand BrowseCommand { get; }
+    public DelegateCommand ScanHikvisionCommand { get; }
     public DelegateCommand TeachCommand { get; }
     public DelegateCommand SaveCommand { get; }
     public DelegateCommand CancelCommand { get; }
     public DialogCloseListener RequestClose { get; }
 
     public VisionTaskDialogViewModel(IVisionConfigurationRepository repository,
-        VisionTemplateTeachingService teachingService, IVisionInspectionAlgorithm algorithm,
+        VisionTemplateTeachingService teachingService, IHikvisionCameraDiscoveryService hikvisionDiscovery,
+        IVisionInspectionAlgorithm algorithm,
         VisionInspectionEngine engine, IAlarmDefinitionRepository alarmRepository,
         IRuleEngineService ruleEngine, IAuthManager authManager, SecurityAuditService audit)
     {
-        _repository = repository; _teachingService = teachingService; _algorithm = algorithm;
+        _repository = repository; _teachingService = teachingService; _hikvisionDiscovery = hikvisionDiscovery; _algorithm = algorithm;
         _engine = engine; _alarmRepository = alarmRepository; _ruleEngine = ruleEngine;
         _authManager = authManager; _audit = audit;
         BrowseCommand = new DelegateCommand(Browse);
+        ScanHikvisionCommand = new DelegateCommand(async () => await ScanHikvisionAsync());
         TeachCommand = new DelegateCommand(async () => await TeachAndTestAsync());
         SaveCommand = new DelegateCommand(async () => await SaveAsync());
         CancelCommand = new DelegateCommand(() => RequestClose.Invoke(ButtonResult.Cancel));
@@ -92,6 +128,8 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         if (camera is not null)
         {
             CameraName = camera.Name; ImageDirectory = camera.ImageDirectory;
+            _deviceSerialNumber = camera.DeviceSerialNumber; _deviceIpAddress = camera.DeviceIpAddress;
+            SelectedCameraSource = CameraSources.FirstOrDefault(item => item.DriverType == camera.DriverType) ?? CameraSources[0];
             IntervalMilliseconds = camera.IntervalMilliseconds; Loop = camera.Loop;
         }
         LoadPreview(); StatusText = "已加载现有配置，可重新教学或直接发布";
@@ -105,14 +143,28 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         StatusText = "目录已选择，请确认首张图片为有瓶盖合格样图，然后点击“教学并测试”";
     }
 
+    private async Task ScanHikvisionAsync()
+    {
+        try
+        {
+            StatusText = "正在调用海康 MVS SDK 扫描 GigE、USB 和虚拟相机...";
+            var cameras = await _hikvisionDiscovery.ScanAsync();
+            DiscoveredCameras.Clear();
+            foreach (var camera in cameras) DiscoveredCameras.Add(camera);
+            SelectedDiscoveredCamera = cameras.FirstOrDefault(item => item.IsVirtual) ?? cameras.FirstOrDefault();
+            StatusText = cameras.Count == 0
+                ? "未发现海康相机。请先在 MVS 中启动模拟相机，然后重新扫描。"
+                : $"扫描完成，共发现 {cameras.Count} 台海康相机，已优先选择虚拟设备。";
+        }
+        catch (Exception ex) { StatusText = "扫描失败：" + ex.Message; }
+    }
+
     private async Task TeachAndTestAsync()
     {
         try
         {
-            var sample = FirstImage();
-            if (sample is null) throw new InvalidOperationException("目录中没有 jpg、png 或 bmp 图片。");
             var roi = CurrentRoi();
-            var frame = new VisionFrame("teach-" + Guid.NewGuid().ToString("N"), _cameraId, await File.ReadAllBytesAsync(sample), DateTimeOffset.UtcNow, sample);
+            var frame = await CaptureTeachingFrameAsync();
             _templatePath = await _teachingService.CreateTemplateAsync(frame, roi,
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IndustrialDAQ", "Vision", "Templates", _taskId, "cap-template.png"));
             var result = await _algorithm.InspectAsync(frame, BuildTask());
@@ -162,8 +214,9 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
 
     private VisionCameraConfig BuildCamera() => new()
     {
-        CameraId = _cameraId, Name = CameraName.Trim(), DriverType = "Directory",
+        CameraId = _cameraId, Name = CameraName.Trim(), DriverType = SelectedCameraSource.DriverType,
         ImageDirectory = ImageDirectory.Trim(), IntervalMilliseconds = IntervalMilliseconds,
+        DeviceSerialNumber = _deviceSerialNumber, DeviceIpAddress = _deviceIpAddress,
         Loop = Loop, TriggerMode = VisionTriggerMode.Continuous, IsEnabled = true
     };
 
@@ -186,6 +239,21 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         PreviewImage = Decode(File.ReadAllBytes(path));
     }
 
+    private async Task<VisionFrame> CaptureTeachingFrameAsync()
+    {
+        if (UsesDirectorySource)
+        {
+            var sample = FirstImage();
+            if (sample is null) throw new InvalidOperationException("目录中没有 jpg、png 或 bmp 图片。");
+            return new VisionFrame("teach-" + Guid.NewGuid().ToString("N"), _cameraId,
+                await File.ReadAllBytesAsync(sample), DateTimeOffset.UtcNow, sample);
+        }
+
+        await using var camera = new IndustrialDAQ.Vision.Cameras.HikvisionMvsCameraDriver(BuildCamera());
+        var frame = await camera.TriggerAsync();
+        return frame ?? throw new InvalidOperationException("海康相机在超时时间内没有返回图像，请检查 MVS 模拟相机是否正在取流。");
+    }
+
     private string? FirstImage() => Directory.Exists(ImageDirectory)
         ? Directory.EnumerateFiles(ImageDirectory).Where(path => new[] { ".jpg", ".jpeg", ".png", ".bmp" }.Contains(Path.GetExtension(path).ToLowerInvariant())).OrderBy(path => path).FirstOrDefault()
         : null;
@@ -196,4 +264,17 @@ public sealed class VisionTaskDialogViewModel : BindableBase, IDialogAware
         var image = new BitmapImage(); image.BeginInit(); image.CacheOption = BitmapCacheOption.OnLoad;
         image.StreamSource = stream; image.EndInit(); image.Freeze(); return image;
     }
+}
+
+/// <summary>相机来源选项，UI 仅展示名称，运行时使用稳定驱动标识。</summary>
+public sealed record VisionCameraSourceOption(string DriverType, string DisplayName);
+
+public static class CameraSourceOptions
+{
+    public static IReadOnlyList<VisionCameraSourceOption> All { get; } =
+    [
+        new(VisionCameraDriverTypes.Directory, "普通图片目录模拟相机"),
+        new(VisionCameraDriverTypes.HikvisionSimulator, "海康图片目录模拟相机"),
+        new(VisionCameraDriverTypes.HikvisionMvs, "海康 MVS 相机（真实 / 虚拟）")
+    ];
 }

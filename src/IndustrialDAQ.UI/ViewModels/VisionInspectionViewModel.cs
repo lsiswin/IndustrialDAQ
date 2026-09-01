@@ -32,6 +32,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public ObservableCollection<VisionTaskListItem> Tasks { get; } = [];
     public ObservableCollection<VisionHistoryItem> History { get; } = [];
     public bool CanModify => _authManager.CanModify;
+    public bool CannotModify => !CanModify;
     public BitmapImage? PreviewImage { get => _previewImage; private set => SetProperty(ref _previewImage, value); }
     public string ResultText { get => _resultText; private set => SetProperty(ref _resultText, value); }
     public string ResultColor { get => _resultColor; private set => SetProperty(ref _resultColor, value); }
@@ -74,6 +75,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     public DelegateCommand StartCommand { get; }
     public DelegateCommand PauseCommand { get; }
     public DelegateCommand ResetCommand { get; }
+    public DelegateCommand LoginToConfigureCommand { get; }
 
     public VisionInspectionViewModel(IVisionConfigurationRepository repository, VisionInspectionEngine engine,
         VisionResultPublisher publisher, IDialogService dialogService, IAuthManager authManager)
@@ -87,6 +89,7 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         StartCommand = new DelegateCommand(async () => await StartAsync());
         PauseCommand = new DelegateCommand(TogglePause);
         ResetCommand = new DelegateCommand(ResetStatistics, () => CanModify);
+        LoginToConfigureCommand = new DelegateCommand(OpenLogin, () => CannotModify);
         _engine.InspectionCompleted += OnInspectionCompleted;
         _authManager.CurrentUserChanged += OnCurrentUserChanged;
         _ = LoadAsync();
@@ -119,6 +122,11 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
         if (item is not null) parameters.Add("TaskId", item.Task.TaskId);
         _dialogService.ShowDialog("VisionTaskDialog", parameters, result => { if (result.Result == ButtonResult.OK) _ = LoadAsync(); });
     }
+
+    private void OpenLogin() => _dialogService.ShowDialog("LoginDialog", result =>
+    {
+        if (result.Result == ButtonResult.OK) DetailText = "登录成功，现在可以新增或配置瓶盖检测任务";
+    });
 
     private async Task StartAsync()
     {
@@ -166,7 +174,9 @@ public sealed class VisionInspectionViewModel : BindableBase, IDestructible
     private void OnCurrentUserChanged(object? sender, EventArgs e)
     {
         RaisePropertyChanged(nameof(CanModify));
+        RaisePropertyChanged(nameof(CannotModify));
         AddTaskCommand.RaiseCanExecuteChanged(); ConfigureCommand.RaiseCanExecuteChanged(); ResetCommand.RaiseCanExecuteChanged();
+        LoginToConfigureCommand.RaiseCanExecuteChanged();
     }
 
     private void RaiseMetrics()
